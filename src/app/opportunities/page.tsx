@@ -27,19 +27,10 @@ type ExternalJob = {
   synced_at: string
 }
 
-const DEMO_OPPORTUNITIES: Opportunity[] = [
-  { id: '1', employer_id: 'e1', employer_name: 'Tech Ottawa', company_name: 'Tech Ottawa', title: 'Digital Marketing Volunteer', description: 'Help our local tech organization grow its social media presence. Manage Instagram, LinkedIn, and Twitter accounts, create content calendars, and analyze engagement metrics.', type: 'volunteer', city: 'Ottawa', work_mode: 'hybrid', skills_required: ['Social Media', 'Content Creation', 'Canva', 'Analytics'], duration: '3 months', status: 'open', created_at: new Date().toISOString() },
-  { id: '2', employer_id: 'e2', employer_name: 'Maple Leaf Accounting', company_name: 'Maple Leaf Accounting', title: 'Junior Bookkeeper – Micro Internship', description: 'Support our accounting team with bookkeeping tasks using QuickBooks. Ideal for finance professionals wanting to understand the Canadian accounting system.', type: 'micro-internship', city: 'Toronto', work_mode: 'remote', skills_required: ['QuickBooks', 'Excel', 'Bookkeeping'], duration: '6 weeks', compensation: '$18/hr', status: 'open', created_at: new Date().toISOString() },
-  { id: '3', employer_id: 'e3', employer_name: 'Calgary Green Builds', company_name: 'Calgary Green Builds', title: 'Project Coordinator Assistant', description: 'Assist our project management team in coordinating sustainable construction projects. Responsibilities include scheduling, communication, and document management.', type: 'volunteer', city: 'Calgary', work_mode: 'onsite', skills_required: ['Project Management', 'MS Office', 'Communication'], duration: '2 months', status: 'open', created_at: new Date().toISOString() },
-  { id: '4', employer_id: 'e4', employer_name: 'Vancouver Data Co', company_name: 'Vancouver Data Co', title: 'Data Analyst – Volunteer', description: 'Work with real business datasets to create dashboards and insights for our operations team. Ideal for data analysts with Python or SQL experience.', type: 'volunteer', city: 'Vancouver', work_mode: 'remote', skills_required: ['Python', 'SQL', 'Tableau'], duration: '8 weeks', status: 'open', created_at: new Date().toISOString() },
-  { id: '5', employer_id: 'e5', employer_name: 'Montreal Café Group', company_name: 'Montreal Café Group', title: 'Operations Support – Part Time', description: 'Join our growing café chain to support daily operations, inventory management, and customer service. Bilingual (French/English) preferred.', type: 'paid', city: 'Montreal', work_mode: 'onsite', skills_required: ['Customer Service', 'Bilingual', 'Inventory'], duration: 'Ongoing', compensation: '$17/hr', status: 'open', created_at: new Date().toISOString() },
-  { id: '6', employer_id: 'e6', employer_name: 'Ottawa HR Solutions', company_name: 'Ottawa HR Solutions', title: 'HR Generalist – Micro Internship', description: 'Support our HR department with recruitment coordination, onboarding, and employee relations. Learn Canadian HR practices and employment law.', type: 'micro-internship', city: 'Ottawa', work_mode: 'hybrid', skills_required: ['HR', 'Recruitment', 'HRIS'], duration: '10 weeks', compensation: '$20/hr', status: 'open', created_at: new Date().toISOString() },
-]
-
 export default function OpportunitiesPage() {
-  const [canstartJobs, setCanstartJobs] = useState<Opportunity[]>(DEMO_OPPORTUNITIES)
+  const [canstartJobs, setCanstartJobs] = useState<Opportunity[]>([])
   const [externalJobs, setExternalJobs] = useState<ExternalJob[]>([])
-  const [filteredCanstart, setFilteredCanstart] = useState<Opportunity[]>(DEMO_OPPORTUNITIES)
+  const [filteredCanstart, setFilteredCanstart] = useState<Opportunity[]>([])
   const [filteredExternal, setFilteredExternal] = useState<ExternalJob[]>([])
   const [search, setSearch] = useState('')
   const [city, setCity] = useState('All Cities')
@@ -73,10 +64,10 @@ export default function OpportunitiesPage() {
     setLoading(true)
     try {
       const { data } = await supabase.from('opportunities').select('*, employer_profiles(company_name)').eq('status', 'open').order('created_at', { ascending: false })
-      if (data && data.length > 0) {
+      if (data) {
         setCanstartJobs(data.map((o: Record<string, unknown>) => ({ ...o, company_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company', employer_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company' })) as Opportunity[])
       }
-    } catch { /* use demo */ } finally { setLoading(false) }
+    } catch { /* ignore */ } finally { setLoading(false) }
   }
 
   const loadExternalJobs = async () => {
@@ -181,8 +172,16 @@ export default function OpportunitiesPage() {
             </div>
           ) : filteredCanstart.length === 0 ? (
             <div className="text-center py-16">
-              <p className="text-gray-500 mb-4">No CanStart opportunities found. Try adjusting your filters.</p>
-              <button onClick={clearFilters} className="text-red-600 hover:underline text-sm">Clear filters</button>
+              <Star size={40} className="mx-auto text-gray-300 mb-4" />
+              <h3 className="text-lg font-semibold text-gray-700 mb-2">
+                {canstartJobs.length === 0 ? 'No verified listings yet' : 'No results match your filters'}
+              </h3>
+              <p className="text-gray-500 text-sm mb-4">
+                {canstartJobs.length === 0
+                  ? 'CanStart verified opportunities will appear here. Employers can post listings, or contact us to add curated opportunities.'
+                  : 'Try adjusting your search or filters.'}
+              </p>
+              {hasFilters && <button onClick={clearFilters} className="text-red-600 hover:underline text-sm">Clear filters</button>}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
