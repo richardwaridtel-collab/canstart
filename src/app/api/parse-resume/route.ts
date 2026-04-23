@@ -16,7 +16,6 @@ export async function POST(request: Request) {
   const { resumePath } = await request.json()
   if (!resumePath) return NextResponse.json({ error: 'resumePath required' }, { status: 400 })
 
-  // Ensure user can only parse their own file
   const pathUserId = resumePath.split('/')[0]
   if (pathUserId !== user.id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -34,27 +33,22 @@ export async function POST(request: Request) {
 
   try {
     if (ext === 'pdf') {
-      // Import from lib directly to avoid Next.js webpack test-file issue
-      const pdfParse = (await import('pdf-parse')).default
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>
       const result = await pdfParse(buffer)
       text = result.text
     } else if (ext === 'docx') {
-      const mammoth = await import('mammoth')
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mammoth = require('mammoth') as { extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }> }
       const result = await mammoth.extractRawText({ buffer })
       text = result.value
-    } else if (ext === 'doc') {
-      // .doc (old binary format) not supported — skip silently
-      text = ''
     }
   } catch (err) {
     return NextResponse.json({ error: `Parse failed: ${err instanceof Error ? err.message : 'unknown'}` }, { status: 500 })
   }
 
   if (text) {
-    await supabase
-      .from('seeker_profiles')
-      .update({ resume_text: text })
-      .eq('user_id', user.id)
+    await supabase.from('seeker_profiles').update({ resume_text: text }).eq('user_id', user.id)
   }
 
   return NextResponse.json({ success: true, parsed: !!text, textLength: text.length })
