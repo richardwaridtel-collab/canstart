@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, ChevronDown, ChevronUp, Target } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
 
@@ -115,6 +115,81 @@ function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): n
   return Math.round(Math.min(100, skillScore + modeScore + cityScore))
 }
 
+// ─── ATS Keyword Analysis ────────────────────────────────────────────────────
+
+const STOP_WORDS = new Set(['the','a','an','and','or','but','in','on','at','to','for','of','with','by','from','as','is','are','was','were','be','been','have','has','had','do','does','did','will','would','could','should','may','might','that','this','these','those','they','them','their','there','what','which','who','how','when','where','why','all','any','each','every','both','few','more','most','some','such','not','only','than','too','also','our','your','we','you','us','team','role','position','job','work','using','use','well','new','able','include','ensure','provide','support','manage','within','about','highly','please','apply','other','over','looking','following','strong','excellent','ideal','preferred','required','minimum','equivalent','including','experience','ability'])
+
+const SKILL_RE = /\b(excel|word|powerpoint|outlook|sharepoint|salesforce|hubspot|marketo|mailchimp|hootsuite|canva|adobe|photoshop|illustrator|indesign|figma|tableau|power bi|quickbooks|xero|sap|oracle|jira|trello|asana|google analytics|google ads|facebook ads|seo|sem|ppc|crm|erp|agile|scrum|kanban|lean|six sigma|pmp|pmbok|itil|bilingual|french|english|spanish|python|java|javascript|typescript|react|sql|html|css|wordpress|shopify|slack|teams|zoom|notion|airtable|monday)\b/gi
+
+function extractKeywords(title: string, description: string, requiredSkills: string[] = []): string[] {
+  const found = new Set<string>()
+  requiredSkills.forEach((s) => { if (s.trim()) found.add(s.trim()) })
+  const fullText = title + ' ' + description
+  ;(fullText.match(SKILL_RE) || []).forEach((m) => found.add(m.trim()))
+  title.split(/[\s,/]+/).forEach((w) => { if (w.length >= 4 && !STOP_WORDS.has(w.toLowerCase())) found.add(w.trim()) })
+  description.split(/[.\n•\-]/).forEach((line) => {
+    if (/\d+\+?\s*years?|degree|diploma|proficien|certif|experience (with|in)|knowledge of|famili/i.test(line)) {
+      line.replace(/[^\w\s+#.-]/g, ' ').split(/\s+/).forEach((w) => {
+        if (w.length >= 4 && !STOP_WORDS.has(w.toLowerCase()) && !/^\d+$/.test(w)) found.add(w.trim())
+      })
+    }
+  })
+  return Array.from(found).filter((k) => k.length >= 3).slice(0, 28)
+}
+
+function computeATSMatch(resumeText: string, keywords: string[]): { matched: string[]; missing: string[]; pct: number } {
+  if (!keywords.length) return { matched: [], missing: [], pct: 0 }
+  const lower = resumeText.toLowerCase()
+  const matched = keywords.filter((k) => lower.includes(k.toLowerCase()))
+  const missing = keywords.filter((k) => !lower.includes(k.toLowerCase()))
+  return { matched, missing, pct: Math.round((matched.length / keywords.length) * 100) }
+}
+
+function ATSPanel({ resumeText, jobTitle, jobDescription, requiredSkills }: { resumeText: string; jobTitle: string; jobDescription: string; requiredSkills?: string[] }) {
+  if (!resumeText || resumeText.length < 50) {
+    return (
+      <div className="mt-3 pt-3 border-t border-dashed border-gray-200 text-xs text-gray-400 text-center py-1">
+        Upload your resume to see ATS keyword analysis
+      </div>
+    )
+  }
+  const keywords = extractKeywords(jobTitle, jobDescription, requiredSkills)
+  if (!keywords.length) return null
+  const { matched, missing, pct } = computeATSMatch(resumeText, keywords)
+  const barColor = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-red-400'
+  const textColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-red-500'
+  return (
+    <div className="mt-3 pt-3 border-t border-dashed border-gray-200">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs font-semibold text-gray-700 flex items-center gap-1"><Target size={12} className="text-purple-500" /> ATS Keyword Match</span>
+        <span className={`text-xs font-bold ${textColor}`}>{pct}% <span className="font-normal text-gray-400">({matched.length}/{keywords.length} keywords)</span></span>
+      </div>
+      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mb-3">
+        <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+      </div>
+      {matched.length > 0 && (
+        <div className="mb-2">
+          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-1.5">✓ Found in resume</p>
+          <div className="flex flex-wrap gap-1">
+            {matched.map((k) => <span key={k} className="text-[11px] bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full">{k}</span>)}
+          </div>
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div>
+          <p className="text-[10px] text-gray-400 uppercase tracking-wide font-medium mb-1.5">✗ Missing from resume</p>
+          <div className="flex flex-wrap gap-1">
+            {missing.slice(0, 12).map((k) => <span key={k} className="text-[11px] bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">{k}</span>)}
+            {missing.length > 12 && <span className="text-[11px] text-gray-400">+{missing.length - 12} more</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
   const color = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
   const label = pct >= 70 ? 'Strong Match' : pct >= 40 ? 'Good Match' : 'Partial Match'
@@ -153,6 +228,8 @@ export default function OpportunitiesPage() {
   const [loading, setLoading] = useState(false)
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
+  const [atsOpenId, setAtsOpenId] = useState<string | null>(null)
+  const toggleAts = (id: string) => setAtsOpenId((prev) => (prev === id ? null : id))
 
   useEffect(() => {
     checkAuth()
@@ -327,10 +404,23 @@ export default function OpportunitiesPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredCanstart.map((opp) => {
                 const pct = computeCanstartMatch(seekerProfile, opp)
+                const fromResume = !!seekerProfile?.resume_text && seekerProfile.resume_text.length > 50
                 return (
                   <div key={opp.id} className="flex flex-col">
                     <OpportunityCard opportunity={opp} />
-                    {seekerProfile && <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4"><MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} /></div>}
+                    {seekerProfile && (
+                      <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
+                        <MatchBar pct={pct} fromResume={fromResume} />
+                        {fromResume && (
+                          <>
+                            <button onClick={() => toggleAts(opp.id)} className="mt-2 flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-medium">
+                              <Target size={12} /> ATS Analysis {atsOpenId === opp.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                            </button>
+                            {atsOpenId === opp.id && <ATSPanel resumeText={seekerProfile.resume_text!} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} />}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -396,6 +486,14 @@ export default function OpportunitiesPage() {
                       {!seekerProfile && (
                         <div className="mt-3 pt-3 border-t border-gray-100">
                           <span className="text-xs text-blue-600 font-medium group-hover:underline">View full job posting →</span>
+                        </div>
+                      )}
+                      {seekerProfile?.resume_text && seekerProfile.resume_text.length > 50 && (
+                        <div onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleAts(job.id) }} className="mt-2">
+                          <button className="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-medium">
+                            <Target size={12} /> ATS Analysis {atsOpenId === job.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </button>
+                          {atsOpenId === job.id && <ATSPanel resumeText={seekerProfile.resume_text} jobTitle={job.title} jobDescription={job.description || ''} />}
                         </div>
                       )}
                     </a>
