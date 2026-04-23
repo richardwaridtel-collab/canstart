@@ -411,14 +411,12 @@ export default function OpportunitiesPage() {
                     {seekerProfile && (
                       <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
                         <MatchBar pct={pct} fromResume={fromResume} />
-                        {fromResume && (
-                          <>
-                            <button onClick={() => toggleAts(opp.id)} className="mt-2 flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-medium">
-                              <Target size={12} /> ATS Analysis {atsOpenId === opp.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                            </button>
-                            {atsOpenId === opp.id && <ATSPanel resumeText={seekerProfile.resume_text!} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} />}
-                          </>
-                        )}
+                        <>
+                          <button onClick={() => toggleAts(opp.id)} className="mt-2 flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-medium">
+                            <Target size={12} /> ATS Analysis {atsOpenId === opp.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </button>
+                          {atsOpenId === opp.id && <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} />}
+                        </>
                       </div>
                     )}
                   </div>
@@ -488,12 +486,12 @@ export default function OpportunitiesPage() {
                           <span className="text-xs text-blue-600 font-medium group-hover:underline">View full job posting →</span>
                         </div>
                       )}
-                      {seekerProfile?.resume_text && seekerProfile.resume_text.length > 50 && (
+                      {seekerProfile && (
                         <div onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleAts(job.id) }} className="mt-2">
                           <button className="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-medium">
                             <Target size={12} /> ATS Analysis {atsOpenId === job.id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                           </button>
-                          {atsOpenId === job.id && <ATSPanel resumeText={seekerProfile.resume_text} jobTitle={job.title} jobDescription={job.description || ''} />}
+                          {atsOpenId === job.id && <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={job.title} jobDescription={job.description || ''} />}
                         </div>
                       )}
                     </a>
