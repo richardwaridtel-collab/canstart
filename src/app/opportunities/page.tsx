@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
 
@@ -386,6 +386,9 @@ export default function OpportunitiesPage() {
   const [loading, setLoading] = useState(false)
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
+  const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set())
+  const [markingApplied, setMarkingApplied] = useState<string | null>(null)
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     checkAuth()
@@ -427,6 +430,7 @@ export default function OpportunitiesPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
       setIsLoggedIn(true)
+      setUserId(user.id)
       const { data: profile } = await supabase.from('profiles').select('role, city').eq('user_id', user.id).single()
       if (profile?.role === 'seeker') {
         const { data: sp } = await supabase.from('seeker_profiles').select('skills, work_preference, resume_text, resume_path').eq('user_id', user.id).single()
@@ -437,9 +441,32 @@ export default function OpportunitiesPage() {
             autoParseResume(user.id, sp.resume_path)
           }
         }
+        // Load previously marked external applications
+        const { data: extApps } = await supabase.from('external_applications').select('external_opportunity_id').eq('seeker_id', user.id)
+        if (extApps) setAppliedJobIds(new Set(extApps.map((a: { external_opportunity_id: string }) => a.external_opportunity_id)))
       }
       loadCanstartJobs()
     }
+  }
+
+  const markApplied = async (job: ExternalJob) => {
+    if (!userId || markingApplied || appliedJobIds.has(job.id)) return
+    setMarkingApplied(job.id)
+    try {
+      await supabase.from('external_applications').insert({
+        seeker_id: userId,
+        external_opportunity_id: job.id,
+        job_title: job.title,
+        company: job.company,
+        job_url: job.url,
+      })
+      setAppliedJobIds((prev) => new Set([...prev, job.id]))
+    } catch { /* ignore */ } finally {
+      setMarkingApplied(null)
+    }
+    // Open the external job in a new tab
+    window.open(job.url, '_blank', 'noopener,noreferrer')
+    track('external_job_click', { category: job.category, city: job.city })
   }
 
   const autoParseResume = async (userId: string, resumePath: string) => {
@@ -632,42 +659,64 @@ export default function OpportunitiesPage() {
                 {filteredExternal.map((job) => {
                   const pct = computeExternalMatch(seekerProfile, job)
                   const expLevel = detectExperienceFromTitle(job.title)
+                  const isApplied = appliedJobIds.has(job.id)
+                  const isMarking = markingApplied === job.id
                   return (
-                    <a key={job.id} href={job.url} target="_blank" rel="noopener noreferrer"
-                      onClick={() => track('external_job_click', { category: job.category, city: job.city })}
-                      className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow hover:border-blue-200 group block"
-                    >
+                    <div key={job.id} className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow hover:border-blue-200 flex flex-col">
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap gap-1.5 mb-2">
                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-100 text-blue-700">{job.category}</span>
                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-600 capitalize">{job.work_mode}</span>
                             <span className="text-xs font-medium px-2 py-1 rounded-full bg-purple-50 text-purple-600">{expLevel}</span>
+                            {isApplied && <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700 flex items-center gap-1"><CheckCircle size={10} /> Applied</span>}
                           </div>
-                          <h3 className="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors leading-snug">{job.title}</h3>
+                          <h3 className="font-semibold text-gray-900 leading-snug">{job.title}</h3>
                           <p className="text-sm text-blue-600 font-medium mt-1">{job.company}</p>
                         </div>
-                        <ExternalLink size={16} className="text-gray-300 group-hover:text-blue-400 flex-shrink-0 mt-1 transition-colors" />
                       </div>
                       <p className="text-gray-500 text-sm line-clamp-2 mb-3">{job.description}</p>
-                      <div className="flex items-center gap-3 text-xs text-gray-400">
+                      <div className="flex items-center gap-3 text-xs text-gray-400 mb-3">
                         <span className="flex items-center gap-1"><MapPin size={12} />{job.city}</span>
                         {formatSalary(job.salary_min, job.salary_max) && (
                           <span className="text-green-600 font-medium">{formatSalary(job.salary_min, job.salary_max)}</span>
                         )}
                       </div>
+
+                      {/* Action buttons */}
+                      <div className="flex gap-2 mt-auto pt-3 border-t border-gray-100">
+                        <a
+                          href={job.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => track('external_job_click', { category: job.category, city: job.city })}
+                          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors"
+                        >
+                          <ExternalLink size={12} /> View Job
+                        </a>
+                        {isLoggedIn && seekerProfile ? (
+                          isApplied ? (
+                            <div className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-green-100 text-green-700 px-3 py-2 rounded-lg cursor-default">
+                              <CheckCircle size={12} /> Applied
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => markApplied(job)}
+                              disabled={isMarking}
+                              className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-60"
+                            >
+                              {isMarking ? <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" /> : <CheckCircle size={12} />}
+                              Mark as Applied
+                            </button>
+                          )
+                        ) : null}
+                      </div>
+
                       {seekerProfile && <MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} />}
-                      {!seekerProfile && (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <span className="text-xs text-blue-600 font-medium group-hover:underline">View full job posting →</span>
-                        </div>
-                      )}
                       {seekerProfile && (
-                        <div onClick={(e) => { e.preventDefault(); e.stopPropagation() }}>
-                          <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={job.title} jobDescription={job.description || ''} />
-                        </div>
+                        <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={job.title} jobDescription={job.description || ''} />
                       )}
-                    </a>
+                    </div>
                   )
                 })}
               </div>

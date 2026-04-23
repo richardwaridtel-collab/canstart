@@ -49,6 +49,11 @@ export default function Navbar() {
                 <Link href="/dashboard" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Dashboard
                 </Link>
+                {user.email === 'richard.waridtel@gmail.com' && (
+                  <Link href="/admin" className="text-xs font-semibold bg-gray-800 text-white px-3 py-1 rounded-lg hover:bg-gray-700 transition-colors">
+                    Admin
+                  </Link>
+                )}
                 <button
                   onClick={handleSignOut}
                   className="text-sm text-gray-500 hover:text-red-600 transition-colors"
@@ -93,6 +98,11 @@ export default function Navbar() {
               <Link href="/dashboard" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Dashboard
               </Link>
+              {user.email === 'richard.waridtel@gmail.com' && (
+                <Link href="/admin" className="block text-gray-700 font-semibold py-2" onClick={() => setMenuOpen(false)}>
+                  ⚙ Admin
+                </Link>
+              )}
               <button onClick={handleSignOut} className="block w-full text-left text-gray-500 py-2">
                 Sign Out
               </button>

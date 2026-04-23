@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink } from 'lucide-react'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
 type Application = { id: string; status: string; created_at: string; opportunity?: { title: string; company_name?: string; type: string } }
 type PostedJob = { id: string; title: string; status: string; created_at: string; type: string; applications_count?: number }
+type ExternalApplication = { id: string; job_title: string; company: string; job_url: string; applied_at: string }
 
 const statusIcon = (status: string) => {
   if (status === 'accepted') return <CheckCircle size={16} className="text-green-500" />
@@ -27,6 +28,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [applications, setApplications] = useState<Application[]>([])
+  const [externalApplications, setExternalApplications] = useState<ExternalApplication[]>([])
   const [postedJobs, setPostedJobs] = useState<PostedJob[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -64,6 +66,13 @@ export default function DashboardPage() {
           company_name: ((a.opportunities as Record<string, unknown>).employer_profiles as { company_name?: string } | null)?.company_name,
         } : undefined,
       })))
+
+      const { data: extApps } = await supabase
+        .from('external_applications')
+        .select('id, job_title, company, job_url, applied_at')
+        .eq('seeker_id', user.id)
+        .order('applied_at', { ascending: false })
+      setExternalApplications((extApps || []) as ExternalApplication[])
     } else {
       const { data: jobs } = await supabase
         .from('opportunities')
@@ -129,10 +138,14 @@ export default function DashboardPage() {
 
         {profile.role === 'seeker' ? (
           <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
               <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
                 <div className="text-2xl font-bold text-gray-900">{applications.length}</div>
-                <div className="text-sm text-gray-500 mt-1">Applications Sent</div>
+                <div className="text-sm text-gray-500 mt-1">CanStart Applied</div>
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+                <div className="text-2xl font-bold text-blue-600">{externalApplications.length}</div>
+                <div className="text-sm text-gray-500 mt-1">External Applied</div>
               </div>
               <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
                 <div className="text-2xl font-bold text-green-600">{applications.filter((a) => a.status === 'accepted').length}</div>
@@ -176,6 +189,37 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+            {/* External applications */}
+            {externalApplications.length > 0 && (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 mt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                    <ExternalLink size={18} className="text-blue-500" /> External Job Applications
+                  </h2>
+                  <Link href="/opportunities" className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                    Find more <ArrowRight size={14} />
+                  </Link>
+                </div>
+                <div className="space-y-3">
+                  {externalApplications.map((app) => (
+                    <div key={app.id} className="flex items-center justify-between p-4 bg-blue-50 rounded-xl border border-blue-100">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 text-sm truncate">{app.job_title}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{app.company} · {new Date(app.applied_at).toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex items-center gap-2 ml-3">
+                        <a href={app.job_url} target="_blank" rel="noopener noreferrer" className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
+                          <ExternalLink size={12} /> View
+                        </a>
+                        <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <CheckCircle size={11} /> Tracked
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <>
