@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   try {
     if (ext === 'pdf') {
       // Import from lib directly to avoid Next.js webpack test-file issue
-      const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default
+      const pdfParse = (await import('pdf-parse')).default
       const result = await pdfParse(buffer)
       text = result.text
     } else if (ext === 'docx') {
