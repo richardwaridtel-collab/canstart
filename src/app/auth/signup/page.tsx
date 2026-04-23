@@ -68,39 +68,38 @@ function SignUpForm() {
       if (!authData.user) throw new Error('Signup failed')
 
       const userId = authData.user.id
+      const hasSession = !!authData.session
 
-      const { error: profileError } = await supabase.from('profiles').insert({
-        user_id: userId,
-        role,
-        full_name: form.fullName,
-        city: form.city,
-      })
-      if (profileError) throw profileError
+      // Update profile with full details (trigger already created the base record)
+      if (hasSession) {
+        await supabase.from('profiles').upsert({
+          user_id: userId, role, full_name: form.fullName, city: form.city,
+        }, { onConflict: 'user_id' })
 
-      if (role === 'seeker') {
-        const { error: seekerError } = await supabase.from('seeker_profiles').insert({
-          user_id: userId,
-          country_of_origin: form.countryOfOrigin,
-          immigration_status: form.immigrationStatus,
-          skills: [],
-          education: '',
-          work_preference: 'any',
-        })
-        if (seekerError) throw seekerError
-        track('signup_seeker', { city: form.city })
+        if (role === 'seeker') {
+          await supabase.from('seeker_profiles').upsert({
+            user_id: userId,
+            country_of_origin: form.countryOfOrigin,
+            immigration_status: form.immigrationStatus,
+            skills: [], education: '', work_preference: 'any',
+          }, { onConflict: 'user_id' })
+          track('signup_seeker', { city: form.city })
+        } else {
+          await supabase.from('employer_profiles').upsert({
+            user_id: userId,
+            company_name: form.companyName,
+            industry: form.industry,
+            company_size: form.companySize,
+            verified: false,
+          }, { onConflict: 'user_id' })
+          track('signup_employer', { city: form.city, industry: form.industry })
+        }
+        router.push('/profile/setup')
       } else {
-        const { error: employerError } = await supabase.from('employer_profiles').insert({
-          user_id: userId,
-          company_name: form.companyName,
-          industry: form.industry,
-          company_size: form.companySize,
-          verified: false,
-        })
-        if (employerError) throw employerError
-        track('signup_employer', { city: form.city, industry: form.industry })
+        // Email confirmation required — profile created by DB trigger
+        track('signup_pending_confirmation', { role })
+        router.push('/auth/check-email')
       }
-
-      router.push('/profile/setup')
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : (err as { message?: string })?.message || JSON.stringify(err)
       setError(msg || 'Something went wrong. Please try again.')
