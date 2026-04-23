@@ -1,0 +1,244 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import type { Opportunity } from '@/lib/types'
+import OpportunityCard from '@/components/OpportunityCard'
+import { Search, Filter, MapPin, SlidersHorizontal } from 'lucide-react'
+import { track } from '@vercel/analytics'
+
+const CITIES = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
+const TYPES = ['All Types', 'volunteer', 'micro-internship', 'paid']
+const MODES = ['All Modes', 'remote', 'hybrid', 'onsite']
+
+// Demo opportunities for when Supabase is not yet configured
+const DEMO_OPPORTUNITIES: Opportunity[] = [
+  {
+    id: '1',
+    employer_id: 'e1',
+    employer_name: 'Tech Ottawa',
+    company_name: 'Tech Ottawa',
+    title: 'Digital Marketing Volunteer',
+    description: 'Help our local tech organization grow its social media presence. You will manage Instagram, LinkedIn, and Twitter accounts, create content calendars, and analyze engagement metrics. Perfect for marketing professionals looking to gain Canadian experience.',
+    type: 'volunteer',
+    city: 'Ottawa',
+    work_mode: 'hybrid',
+    skills_required: ['Social Media', 'Content Creation', 'Canva', 'Analytics'],
+    duration: '3 months',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '2',
+    employer_id: 'e2',
+    employer_name: 'Maple Leaf Accounting',
+    company_name: 'Maple Leaf Accounting',
+    title: 'Junior Bookkeeper – Micro Internship',
+    description: 'Support our accounting team with bookkeeping tasks using QuickBooks. Ideal for finance professionals or recent graduates wanting to understand the Canadian accounting system and standards.',
+    type: 'micro-internship',
+    city: 'Toronto',
+    work_mode: 'remote',
+    skills_required: ['QuickBooks', 'Excel', 'Bookkeeping', 'Attention to Detail'],
+    duration: '6 weeks',
+    compensation: '$18/hr',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '3',
+    employer_id: 'e3',
+    employer_name: 'Calgary Green Builds',
+    company_name: 'Calgary Green Builds',
+    title: 'Project Coordinator Assistant',
+    description: 'Assist our project management team in coordinating sustainable construction projects. Responsibilities include scheduling, communication coordination, and document management using MS Project.',
+    type: 'volunteer',
+    city: 'Calgary',
+    work_mode: 'onsite',
+    skills_required: ['Project Management', 'MS Office', 'Communication', 'Scheduling'],
+    duration: '2 months',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '4',
+    employer_id: 'e4',
+    employer_name: 'Vancouver Data Co',
+    company_name: 'Vancouver Data Co',
+    title: 'Data Analyst – Volunteer',
+    description: 'Work with real business datasets to create dashboards and insights for our operations team. This role is ideal for data analysts with Python or SQL experience looking to build a Canadian portfolio.',
+    type: 'volunteer',
+    city: 'Vancouver',
+    work_mode: 'remote',
+    skills_required: ['Python', 'SQL', 'Tableau', 'Data Analysis'],
+    duration: '8 weeks',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '5',
+    employer_id: 'e5',
+    employer_name: 'Montreal Café Group',
+    company_name: 'Montreal Café Group',
+    title: 'Operations Support – Part Time',
+    description: 'Join our growing café chain to support daily operations, inventory management, and customer service. Bilingual (French/English) preferred. Entry-level paid position with full training provided.',
+    type: 'paid',
+    city: 'Montreal',
+    work_mode: 'onsite',
+    skills_required: ['Customer Service', 'Bilingual', 'Inventory', 'Teamwork'],
+    duration: 'Ongoing',
+    compensation: '$17/hr',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: '6',
+    employer_id: 'e6',
+    employer_name: 'Ottawa HR Solutions',
+    company_name: 'Ottawa HR Solutions',
+    title: 'HR Generalist – Micro Internship',
+    description: 'Support our HR department with recruitment coordination, onboarding paperwork, and employee relations. Great for HR professionals wanting to learn Canadian HR practices and employment law.',
+    type: 'micro-internship',
+    city: 'Ottawa',
+    work_mode: 'hybrid',
+    skills_required: ['HR', 'Recruitment', 'HRIS', 'Employment Law'],
+    duration: '10 weeks',
+    compensation: '$20/hr',
+    status: 'open',
+    created_at: new Date().toISOString(),
+  },
+]
+
+export default function OpportunitiesPage() {
+  const [opportunities, setOpportunities] = useState<Opportunity[]>(DEMO_OPPORTUNITIES)
+  const [filtered, setFiltered] = useState<Opportunity[]>(DEMO_OPPORTUNITIES)
+  const [search, setSearch] = useState('')
+  const [city, setCity] = useState('All Cities')
+  const [type, setType] = useState('All Types')
+  const [mode, setMode] = useState('All Modes')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    loadOpportunities()
+  }, [])
+
+  useEffect(() => {
+    applyFilters()
+  }, [search, city, type, mode, opportunities])
+
+  const loadOpportunities = async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('opportunities')
+        .select('*, employer_profiles(company_name)')
+        .eq('status', 'open')
+        .order('created_at', { ascending: false })
+
+      if (!error && data && data.length > 0) {
+        const mapped = data.map((o: Record<string, unknown>) => ({
+          ...o,
+          company_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company',
+          employer_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company',
+        })) as Opportunity[]
+        setOpportunities(mapped)
+      }
+    } catch {
+      // Use demo data if DB not connected
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const applyFilters = () => {
+    let result = [...opportunities]
+    if (search) result = result.filter((o) => o.title.toLowerCase().includes(search.toLowerCase()) || o.description.toLowerCase().includes(search.toLowerCase()) || o.company_name.toLowerCase().includes(search.toLowerCase()) || o.skills_required?.some((s) => s.toLowerCase().includes(search.toLowerCase())))
+    if (city !== 'All Cities') result = result.filter((o) => o.city === city)
+    if (type !== 'All Types') result = result.filter((o) => o.type === type)
+    if (mode !== 'All Modes') result = result.filter((o) => o.work_mode === mode)
+    setFiltered(result)
+  }
+
+  const handleSearch = (val: string) => {
+    setSearch(val)
+    if (val.length > 2) track('opportunity_search', { query: val })
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-gradient-to-br from-red-700 to-red-600 text-white py-14">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <h1 className="text-3xl sm:text-4xl font-bold mb-3">Browse Opportunities</h1>
+          <p className="text-red-100 text-lg mb-8">Find volunteer roles, micro-internships, and paid positions with verified Canadian businesses</p>
+
+          {/* Search */}
+          <div className="relative max-w-2xl">
+            <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              placeholder="Search by title, skill, or company..."
+              className="w-full pl-12 pr-4 py-4 rounded-xl text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-yellow-300 shadow-lg"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Filters */}
+        <div className="flex flex-wrap gap-3 mb-8 items-center">
+          <div className="flex items-center gap-2 text-gray-500 text-sm">
+            <SlidersHorizontal size={16} />
+            <span>Filter by:</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2">
+            <MapPin size={14} className="text-gray-400" />
+            <select value={city} onChange={(e) => setCity(e.target.value)} className="py-2 text-sm text-gray-700 focus:outline-none bg-transparent">
+              {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
+            {TYPES.map((t) => <option key={t} value={t}>{t === 'All Types' ? t : t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+          </select>
+          <select value={mode} onChange={(e) => setMode(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
+            {MODES.map((m) => <option key={m} value={m}>{m === 'All Modes' ? m : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+          </select>
+          {(city !== 'All Cities' || type !== 'All Types' || mode !== 'All Modes' || search) && (
+            <button onClick={() => { setCity('All Cities'); setType('All Types'); setMode('All Modes'); setSearch('') }} className="text-sm text-red-600 hover:text-red-700 font-medium">
+              Clear filters
+            </button>
+          )}
+          <span className="ml-auto text-sm text-gray-500">{filtered.length} opportunities found</span>
+        </div>
+
+        {/* Grid */}
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="bg-white rounded-xl p-5 animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3 mb-3" />
+                <div className="h-6 bg-gray-200 rounded w-3/4 mb-2" />
+                <div className="h-4 bg-gray-200 rounded w-1/2 mb-4" />
+                <div className="h-16 bg-gray-100 rounded mb-4" />
+                <div className="h-9 bg-gray-200 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16">
+            <Filter size={40} className="mx-auto text-gray-300 mb-4" />
+            <h3 className="text-lg font-semibold text-gray-700 mb-2">No opportunities found</h3>
+            <p className="text-gray-500 text-sm">Try adjusting your search filters</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filtered.map((opp) => (
+              <OpportunityCard key={opp.id} opportunity={opp} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
