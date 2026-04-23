@@ -103,6 +103,7 @@ export default function ProfileSetupPage() {
   const [additionalDocFile, setAdditionalDocFile] = useState<File | null>(null)
   const [additionalDocPath, setAdditionalDocPath] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState('')
+  const [resumeParsing, setResumeParsing] = useState(false)
 
   useEffect(() => { loadProfile() }, [])
 
@@ -179,6 +180,19 @@ export default function ProfileSetupPage() {
         additional_doc_path: newAdditionalDocPath,
       }, { onConflict: 'user_id' })
       track('profile_updated_seeker', { skills_count: skills.length, has_resume: !!newResumePath })
+
+      // Parse resume text for better job matching
+      if (resumeFile && newResumePath) {
+        setResumeParsing(true)
+        try {
+          const { data: { session } } = await supabase.auth.getSession()
+          await fetch('/api/parse-resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+            body: JSON.stringify({ resumePath: newResumePath }),
+          })
+        } catch { /* non-critical */ } finally { setResumeParsing(false) }
+      }
     } else {
       await supabase.from('employer_profiles').upsert({
         user_id: user.id,
@@ -362,7 +376,9 @@ export default function ProfileSetupPage() {
               disabled={loading || saved}
               className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
             >
-              {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <><CheckCircle size={18} /> Save Profile</>}
+              {loading || resumeParsing
+              ? <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />{resumeParsing ? 'Analyzing resume...' : 'Saving...'}</>
+              : <><CheckCircle size={18} /> Save Profile</>}
             </button>
             <button
               type="button"

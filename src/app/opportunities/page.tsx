@@ -47,7 +47,7 @@ type ExternalJob = {
   synced_at: string
 }
 
-type SeekerProfile = { skills: string[]; work_preference: string; city: string }
+type SeekerProfile = { skills: string[]; work_preference: string; city: string; resume_text?: string }
 
 function detectExperienceFromTitle(title: string): string {
   const t = title.toLowerCase()
@@ -57,13 +57,21 @@ function detectExperienceFromTitle(title: string): string {
 }
 
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
-  if (!seeker || !seeker.skills.length) return 0
+  if (!seeker) return 0
   const required = opp.skills_required || []
+  const resumeText = seeker.resume_text?.toLowerCase() || ''
+  const hasResume = resumeText.length > 50
+
   let score = 0
   if (required.length > 0) {
-    const matched = required.filter((r) => seeker.skills.some((s) => s.toLowerCase().includes(r.toLowerCase()) || r.toLowerCase().includes(s.toLowerCase())))
+    const matched = required.filter((r) => {
+      const rLower = r.toLowerCase()
+      // Check resume text first (more accurate), fallback to profile skills
+      if (hasResume) return resumeText.includes(rLower)
+      return seeker.skills.some((s) => s.toLowerCase().includes(rLower) || rLower.includes(s.toLowerCase()))
+    })
     score += (matched.length / required.length) * 70
-  } else {
+  } else if (seeker.skills.length > 0 || hasResume) {
     score += 35
   }
   if (seeker.work_preference === 'any' || seeker.work_preference === opp.work_mode) score += 20
@@ -73,10 +81,23 @@ function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): n
 }
 
 function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
-  if (!seeker || !seeker.skills.length) return 0
+  if (!seeker) return 0
   const jobText = (job.title + ' ' + (job.description || '')).toLowerCase()
-  const matched = seeker.skills.filter((s) => jobText.includes(s.toLowerCase()))
-  const skillScore = Math.min(70, matched.length > 0 ? (matched.length / Math.min(seeker.skills.length, 5)) * 70 : 0)
+  const resumeText = seeker.resume_text?.toLowerCase() || ''
+  const hasResume = resumeText.length > 50
+
+  let skillScore = 0
+  if (hasResume) {
+    // Find skills from profile that are confirmed in resume AND appear in the job
+    const confirmedSkills = seeker.skills.filter((s) => resumeText.includes(s.toLowerCase()))
+    const skillsToCheck = confirmedSkills.length > 0 ? confirmedSkills : seeker.skills
+    const matched = skillsToCheck.filter((s) => jobText.includes(s.toLowerCase()))
+    skillScore = Math.min(70, skillsToCheck.length > 0 ? (matched.length / Math.min(skillsToCheck.length, 6)) * 70 : 0)
+  } else if (seeker.skills.length > 0) {
+    const matched = seeker.skills.filter((s) => jobText.includes(s.toLowerCase()))
+    skillScore = Math.min(70, (matched.length / Math.min(seeker.skills.length, 5)) * 70)
+  }
+
   let modeScore = 0
   if (seeker.work_preference === 'any' || seeker.work_preference === job.work_mode) modeScore = 20
   else if (job.work_mode === 'hybrid') modeScore = 10
@@ -84,14 +105,17 @@ function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): n
   return Math.round(Math.min(100, skillScore + modeScore + cityScore))
 }
 
-function MatchBar({ pct }: { pct: number }) {
+function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
   const color = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
   const label = pct >= 70 ? 'Strong Match' : pct >= 40 ? 'Good Match' : 'Partial Match'
   const textColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-orange-500'
   return (
     <div className="mt-3 pt-3 border-t border-gray-100">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-400">Your Match</span>
+        <span className="text-xs text-gray-400 flex items-center gap-1">
+          Your Match
+          {fromResume && <span className="bg-green-100 text-green-700 text-[10px] px-1.5 py-0.5 rounded-full font-medium">resume</span>}
+        </span>
         <span className={`text-xs font-semibold ${textColor}`}>{pct}% · {label}</span>
       </div>
       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
@@ -162,8 +186,8 @@ export default function OpportunitiesPage() {
       setIsLoggedIn(true)
       const { data: profile } = await supabase.from('profiles').select('role, city').eq('user_id', user.id).single()
       if (profile?.role === 'seeker') {
-        const { data: sp } = await supabase.from('seeker_profiles').select('skills, work_preference').eq('user_id', user.id).single()
-        if (sp) setSeekerProfile({ skills: sp.skills || [], work_preference: sp.work_preference || 'any', city: profile.city || '' })
+        const { data: sp } = await supabase.from('seeker_profiles').select('skills, work_preference, resume_text').eq('user_id', user.id).single()
+        if (sp) setSeekerProfile({ skills: sp.skills || [], work_preference: sp.work_preference || 'any', city: profile.city || '', resume_text: sp.resume_text || '' })
       }
       loadCanstartJobs()
     }
@@ -296,7 +320,7 @@ export default function OpportunitiesPage() {
                 return (
                   <div key={opp.id} className="flex flex-col">
                     <OpportunityCard opportunity={opp} />
-                    {seekerProfile && <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4"><MatchBar pct={pct} /></div>}
+                    {seekerProfile && <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4"><MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} /></div>}
                   </div>
                 )
               })}
@@ -358,7 +382,7 @@ export default function OpportunitiesPage() {
                           <span className="text-green-600 font-medium">{formatSalary(job.salary_min, job.salary_max)}</span>
                         )}
                       </div>
-                      {seekerProfile && <MatchBar pct={pct} />}
+                      {seekerProfile && <MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} />}
                       {!seekerProfile && (
                         <div className="mt-3 pt-3 border-t border-gray-100">
                           <span className="text-xs text-blue-600 font-medium group-hover:underline">View full job posting →</span>
