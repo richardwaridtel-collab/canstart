@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import {
@@ -34,7 +34,7 @@ type Stats = {
   externalJobsInDb: number
 }
 
-function StatCard({ value, label, icon, color = 'text-gray-900', sub }: { value: number | string; label: string; icon: React.ReactNode; color?: string; sub?: string }) {
+function StatCard({ value, label, icon, color = 'text-gray-900', sub }: { value: number | string; label: string; icon: ReactNode; color?: string; sub?: string }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4">
       <div className="flex items-start justify-between">
@@ -63,7 +63,8 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [authorized, setAuthorized] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'seekers' | 'employers' | 'jobs' | 'applications' | 'external'>('overview')
+  type TabId = 'overview' | 'seekers' | 'employers' | 'jobs' | 'applications' | 'external'
+  const [activeTab, setActiveTab] = useState<TabId>('overview')
   const [search, setSearch] = useState('')
 
   const [stats, setStats]           = useState<Stats | null>(null)
@@ -217,14 +218,14 @@ export default function AdminPage() {
   const filteredApps     = apps.filter((a)      => !q || (a.seeker_name || '').toLowerCase().includes(q) || (a.job_title || '').toLowerCase().includes(q))
   const filteredExtApps  = extApps.filter((a)   => !q || (a.seeker_name || '').toLowerCase().includes(q) || a.company?.toLowerCase().includes(q) || a.job_title?.toLowerCase().includes(q))
 
-  const tabs = [
-    { id: 'overview',      label: 'Overview',         icon: <BarChart2 size={15} /> },
+  const tabs: { id: TabId; label: string; icon: ReactNode }[] = [
+    { id: 'overview',      label: 'Overview',                          icon: <BarChart2 size={15} /> },
     { id: 'seekers',       label: `Candidates (${seekers.length})`,    icon: <Users size={15} /> },
     { id: 'employers',     label: `Employers (${employers.length})`,   icon: <Building2 size={15} /> },
     { id: 'jobs',          label: `Jobs (${jobs.length})`,             icon: <Briefcase size={15} /> },
     { id: 'applications',  label: `Applications (${apps.length})`,     icon: <FileText size={15} /> },
     { id: 'external',      label: `Ext. Applied (${extApps.length})`,  icon: <ExternalLink size={15} /> },
-  ] as const
+  ]
 
   if (loading) return (
     <div className="max-w-6xl mx-auto px-4 py-10 animate-pulse space-y-4">
