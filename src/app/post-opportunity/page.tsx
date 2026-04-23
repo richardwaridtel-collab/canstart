@@ -23,6 +23,8 @@ export default function PostOpportunityPage() {
     workMode: 'hybrid',
     duration: '',
     compensation: '',
+    experienceLevel: 'any',
+    category: 'General',
   })
 
   useEffect(() => {
@@ -59,6 +61,8 @@ export default function PostOpportunityPage() {
       duration: form.duration,
       compensation: form.compensation || null,
       skills_required: skills,
+      experience_level: form.experienceLevel,
+      category: form.category,
       status: 'open',
     })
 
@@ -71,6 +75,7 @@ export default function PostOpportunityPage() {
   }
 
   const cities = ['Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
+  const categories = ['General', 'Marketing & Communications', 'Sales & Business Development', 'Project Management', 'Data & Analytics', 'Technology & IT', 'Finance & Accounting', 'Human Resources', 'Customer Service', 'Administration & Office', 'Business Analysis', 'Operations & Logistics', 'Design & Creative', 'Education & Training', 'Healthcare & Social Services', 'Engineering', 'Legal & Compliance']
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
@@ -146,12 +151,7 @@ export default function PostOpportunityPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Work Mode <span className="text-red-500">*</span></label>
-              <select
-                required
-                value={form.workMode}
-                onChange={(e) => setForm({ ...form, workMode: e.target.value })}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
-              >
+              <select required value={form.workMode} onChange={(e) => setForm({ ...form, workMode: e.target.value })} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white">
                 <option value="remote">Remote</option>
                 <option value="hybrid">Hybrid</option>
                 <option value="onsite">On-site</option>
@@ -159,14 +159,25 @@ export default function PostOpportunityPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Duration <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                required
-                value={form.duration}
-                onChange={(e) => setForm({ ...form, duration: e.target.value })}
-                placeholder="e.g., 3 months, 6 weeks"
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
+              <input type="text" required value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} placeholder="e.g., 3 months, 6 weeks" className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Experience Level</label>
+              <select value={form.experienceLevel} onChange={(e) => setForm({ ...form, experienceLevel: e.target.value })} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white">
+                <option value="any">Any Level</option>
+                <option value="entry">Entry Level (0–2 yrs)</option>
+                <option value="mid">Mid Level (3–5 yrs)</option>
+                <option value="senior">Senior Level (5+ yrs)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white">
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
             </div>
           </div>
 
