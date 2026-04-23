@@ -1,18 +1,10 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID!
-const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY!
 const ADZUNA_BASE = 'https://api.adzuna.com/v1/api/jobs/ca/search'
 
 const CANADIAN_CITIES = ['Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
 
-// Job categories to sync — focused on newcomer-friendly roles
 const SEARCH_QUERIES = [
   { what: 'marketing manager', category: 'Marketing' },
   { what: 'digital marketing', category: 'Marketing' },
@@ -48,7 +40,6 @@ function extractCity(location: AdzunaJob['location']): string {
   for (const city of CANADIAN_CITIES) {
     if (display.toLowerCase().includes(city.toLowerCase())) return city
   }
-  // Try area array
   if (location.area) {
     for (const area of location.area) {
       for (const city of CANADIAN_CITIES) {
@@ -66,10 +57,10 @@ function detectWorkMode(title: string, description: string): string {
   return 'onsite'
 }
 
-async function fetchAdzunaJobs(what: string, page = 1): Promise<AdzunaJob[]> {
+async function fetchAdzunaJobs(what: string, appId: string, appKey: string, page = 1): Promise<AdzunaJob[]> {
   const params = new URLSearchParams({
-    app_id: ADZUNA_APP_ID,
-    app_key: ADZUNA_APP_KEY,
+    app_id: appId,
+    app_key: appKey,
     results_per_page: '20',
     what,
     where: 'canada',
@@ -88,23 +79,29 @@ async function fetchAdzunaJobs(what: string, page = 1): Promise<AdzunaJob[]> {
 }
 
 export async function GET(request: Request) {
-  // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID
+  const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY
+
   if (!ADZUNA_APP_ID || !ADZUNA_APP_KEY) {
     return NextResponse.json({ error: 'Adzuna API keys not configured' }, { status: 500 })
   }
 
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+
   let totalInserted = 0
-  let totalUpdated = 0
   const errors: string[] = []
 
   for (const { what, category } of SEARCH_QUERIES) {
     try {
-      const jobs = await fetchAdzunaJobs(what)
+      const jobs = await fetchAdzunaJobs(what, ADZUNA_APP_ID, ADZUNA_APP_KEY)
 
       for (const job of jobs) {
         const city = extractCity(job.location)
@@ -136,14 +133,12 @@ export async function GET(request: Request) {
         }
       }
 
-      // Small delay between requests to be respectful
       await new Promise((r) => setTimeout(r, 500))
     } catch (err) {
       errors.push(`Query "${what}": ${err instanceof Error ? err.message : 'unknown error'}`)
     }
   }
 
-  // Clean up old jobs (older than 30 days)
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
   await supabase.from('external_opportunities').delete().lt('synced_at', thirtyDaysAgo)
 
@@ -156,7 +151,6 @@ export async function GET(request: Request) {
   })
 }
 
-// Also allow POST for manual trigger from dashboard
 export async function POST(request: Request) {
   return GET(request)
 }
