@@ -429,11 +429,36 @@ export default function OpportunitiesPage() {
       setIsLoggedIn(true)
       const { data: profile } = await supabase.from('profiles').select('role, city').eq('user_id', user.id).single()
       if (profile?.role === 'seeker') {
-        const { data: sp } = await supabase.from('seeker_profiles').select('skills, work_preference, resume_text').eq('user_id', user.id).single()
-        if (sp) setSeekerProfile({ skills: sp.skills || [], work_preference: sp.work_preference || 'any', city: profile.city || '', resume_text: sp.resume_text || '' })
+        const { data: sp } = await supabase.from('seeker_profiles').select('skills, work_preference, resume_text, resume_path').eq('user_id', user.id).single()
+        if (sp) {
+          setSeekerProfile({ skills: sp.skills || [], work_preference: sp.work_preference || 'any', city: profile.city || '', resume_text: sp.resume_text || '' })
+          // Auto-parse resume in background if file exists but text not yet extracted
+          if (sp.resume_path && (!sp.resume_text || sp.resume_text.length < 50)) {
+            autoParseResume(user.id, sp.resume_path)
+          }
+        }
       }
       loadCanstartJobs()
     }
+  }
+
+  const autoParseResume = async (userId: string, resumePath: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      const res = await fetch('/api/parse-resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ resumePath }),
+      })
+      if (res.ok) {
+        // Reload resume_text into state so ATS analysis updates without page refresh
+        const { data: fresh } = await supabase.from('seeker_profiles').select('resume_text').eq('user_id', userId).single()
+        if (fresh?.resume_text && fresh.resume_text.length > 50) {
+          setSeekerProfile((prev) => prev ? { ...prev, resume_text: fresh.resume_text } : prev)
+        }
+      }
+    } catch { /* silent — non-critical */ }
   }
 
   const loadCanstartJobs = async () => {

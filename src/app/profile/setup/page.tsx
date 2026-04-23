@@ -123,6 +123,18 @@ export default function ProfileSetupPage() {
         setForm((f) => ({ ...f, bio: data.bio || '', education: data.education || '', workPreference: data.work_preference || 'any', linkedinUrl: data.linkedin_url || '' }))
         setResumePath(data.resume_path || null)
         setAdditionalDocPath(data.additional_doc_path || null)
+        // Auto-parse if resume exists but text was never extracted
+        if (data.resume_path && (!data.resume_text || data.resume_text.length < 50)) {
+          setResumeParsing(true)
+          try {
+            const { data: { session } } = await supabase.auth.getSession()
+            await fetch('/api/parse-resume', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+              body: JSON.stringify({ resumePath: data.resume_path }),
+            })
+          } catch { /* silent */ } finally { setResumeParsing(false) }
+        }
       }
     } else {
       const { data } = await supabase.from('employer_profiles').select('*').eq('user_id', user.id).single()
