@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink } from 'lucide-react'
+import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink, FileText, Download } from 'lucide-react'
 
 type Candidate = {
   id: string
@@ -15,30 +15,25 @@ type Candidate = {
   work_preference: string
   bio: string
   linkedin_url?: string
+  resume_path?: string
+  additional_doc_path?: string
 }
-
-const DEMO_CANDIDATES: Candidate[] = [
-  { id: '1', full_name: 'Fariha J.', city: 'Ottawa', country_of_origin: 'Bangladesh', immigration_status: 'owp', skills: ['Business Analysis', 'SQL', 'Excel', 'JIRA', 'Agile'], education: "Master's in Business Administration", work_preference: 'hybrid', bio: 'Experienced Business Analyst with 10 years of international experience, eager to contribute to Canadian organizations while gaining local experience.' },
-  { id: '2', full_name: 'Arjun P.', city: 'Toronto', country_of_origin: 'India', immigration_status: 'pr', skills: ['Python', 'Machine Learning', 'Data Science', 'TensorFlow', 'SQL'], education: "Bachelor's in Computer Science", work_preference: 'remote', bio: 'Data Scientist with expertise in ML models. Looking to apply my skills in the Canadian tech sector.' },
-  { id: '3', full_name: 'Maria G.', city: 'Vancouver', country_of_origin: 'Philippines', immigration_status: 'student', skills: ['Marketing', 'Social Media', 'Content Creation', 'SEO', 'Canva'], education: "Bachelor's in Marketing", work_preference: 'hybrid', bio: 'Creative marketing professional passionate about digital content and brand growth.' },
-  { id: '4', full_name: 'Ahmed M.', city: 'Calgary', country_of_origin: 'Egypt', immigration_status: 'owp', skills: ['Project Management', 'AutoCAD', 'Engineering', 'MS Project'], education: "Bachelor's in Civil Engineering", work_preference: 'onsite', bio: 'Civil engineer with 8 years experience in infrastructure projects. PMP certified.' },
-  { id: '5', full_name: 'Lin W.', city: 'Ottawa', country_of_origin: 'China', immigration_status: 'pr', skills: ['Accounting', 'QuickBooks', 'Financial Analysis', 'Excel', 'Tax'], education: "Bachelor's in Accounting (CPA candidate)", work_preference: 'hybrid', bio: 'CPA candidate with extensive accounting experience, familiar with GAAP and IFRS.' },
-  { id: '6', full_name: 'Priya S.', city: 'Montreal', country_of_origin: 'India', immigration_status: 'owp', skills: ['HR', 'Recruiting', 'HRIS', 'Onboarding', 'Employee Relations'], education: "Master's in Human Resources Management", work_preference: 'remote', bio: 'HR professional with 6 years of experience across multiple industries. Bilingual (English/French).' },
-]
 
 const statusLabels: Record<string, string> = { owp: 'Open Work Permit', pr: 'Permanent Resident', student: 'Student Visa', citizen: 'Citizen' }
 const modeLabels: Record<string, string> = { remote: 'Remote', hybrid: 'Hybrid', onsite: 'On-site', any: 'Any' }
 
 export default function CandidatesPage() {
-  const [candidates, setCandidates] = useState<Candidate[]>(DEMO_CANDIDATES)
-  const [filtered, setFiltered] = useState<Candidate[]>(DEMO_CANDIDATES)
+  const [candidates, setCandidates] = useState<Candidate[]>([])
+  const [filtered, setFiltered] = useState<Candidate[]>([])
   const [search, setSearch] = useState('')
   const [city, setCity] = useState('All Cities')
-  const [loading] = useState(false)
+  const [isEmployer, setIsEmployer] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const cities = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
 
   useEffect(() => {
+    checkEmployer()
     loadCandidates()
   }, [])
 
@@ -48,6 +43,13 @@ export default function CandidatesPage() {
     if (city !== 'All Cities') result = result.filter((c) => c.city === city)
     setFiltered(result)
   }, [search, city, candidates])
+
+  const checkEmployer = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('profiles').select('role').eq('user_id', user.id).single()
+    setIsEmployer(data?.role === 'employer')
+  }
 
   const loadCandidates = async () => {
     try {
@@ -71,11 +73,21 @@ export default function CandidatesPage() {
             work_preference: (sp?.work_preference as string) || 'any',
             bio: (sp?.bio as string) || '',
             linkedin_url: sp?.linkedin_url as string | undefined,
+            resume_path: sp?.resume_path as string | undefined,
+            additional_doc_path: sp?.additional_doc_path as string | undefined,
           }
         })
         setCandidates(mapped)
       }
-    } catch { /* use demo */ }
+    } catch { /* ignore */ }
+  }
+
+  const downloadDoc = async (path: string, label: string, candidateId: string) => {
+    setDownloadingId(candidateId + label)
+    const { data, error } = await supabase.storage.from('candidate-documents').createSignedUrl(path, 3600)
+    setDownloadingId(null)
+    if (error || !data?.signedUrl) { alert('Could not generate download link. Please try again.'); return }
+    window.open(data.signedUrl, '_blank')
   }
 
   return (
@@ -111,43 +123,70 @@ export default function CandidatesPage() {
           <span className="ml-auto text-sm text-gray-500">{filtered.length} candidates</span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filtered.map((candidate) => (
-            <div key={candidate.id} className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-md transition-shadow hover:border-gray-300">
-              <div className="flex items-start justify-between mb-3">
-                <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-700 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                  {candidate.full_name.charAt(0)}
+        {filtered.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">No candidates found.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filtered.map((candidate) => (
+              <div key={candidate.id} className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-md transition-shadow hover:border-gray-300">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-700 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                    {candidate.full_name.charAt(0)}
+                  </div>
+                  {candidate.linkedin_url && (
+                    <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700">
+                      <ExternalLink size={16} />
+                    </a>
+                  )}
                 </div>
-                {candidate.linkedin_url && (
-                  <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700">
-                    <ExternalLink size={16} />
-                  </a>
+                <h3 className="font-bold text-gray-900 text-lg">{candidate.full_name}</h3>
+                <div className="flex flex-wrap gap-2 mt-1 mb-3 text-xs text-gray-500">
+                  <span className="flex items-center gap-1"><MapPin size={12} />{candidate.city}</span>
+                  {candidate.country_of_origin && <span className="flex items-center gap-1"><Globe size={12} />From {candidate.country_of_origin}</span>}
+                  <span className="flex items-center gap-1"><Briefcase size={12} />{modeLabels[candidate.work_preference] || 'Any'}</span>
+                </div>
+                {candidate.immigration_status && (
+                  <span className="inline-block text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full mb-3">
+                    {statusLabels[candidate.immigration_status] || candidate.immigration_status}
+                  </span>
+                )}
+                {candidate.bio && <p className="text-gray-600 text-sm line-clamp-2 mb-3">{candidate.bio}</p>}
+                {candidate.education && <p className="text-xs text-gray-500 mb-3">{candidate.education}</p>}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {candidate.skills.slice(0, 4).map((s) => (
+                    <span key={s} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
+                  ))}
+                  {candidate.skills.length > 4 && <span className="text-xs text-gray-400">+{candidate.skills.length - 4}</span>}
+                </div>
+
+                {isEmployer && (candidate.resume_path || candidate.additional_doc_path) && (
+                  <div className="pt-3 border-t border-gray-100 flex flex-wrap gap-2">
+                    {candidate.resume_path && (
+                      <button
+                        onClick={() => downloadDoc(candidate.resume_path!, 'resume', candidate.id)}
+                        disabled={downloadingId === candidate.id + 'resume'}
+                        className="flex items-center gap-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-700 px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50"
+                      >
+                        {downloadingId === candidate.id + 'resume' ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <Download size={12} />}
+                        Resume
+                      </button>
+                    )}
+                    {candidate.additional_doc_path && (
+                      <button
+                        onClick={() => downloadDoc(candidate.additional_doc_path!, 'additional', candidate.id)}
+                        disabled={downloadingId === candidate.id + 'additional'}
+                        className="flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50"
+                      >
+                        {downloadingId === candidate.id + 'additional' ? <div className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" /> : <FileText size={12} />}
+                        Document
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-              <h3 className="font-bold text-gray-900 text-lg">{candidate.full_name}</h3>
-              <div className="flex flex-wrap gap-2 mt-1 mb-3 text-xs text-gray-500">
-                <span className="flex items-center gap-1"><MapPin size={12} />{candidate.city}</span>
-                {candidate.country_of_origin && <span className="flex items-center gap-1"><Globe size={12} />From {candidate.country_of_origin}</span>}
-                <span className="flex items-center gap-1"><Briefcase size={12} />{modeLabels[candidate.work_preference] || 'Any'}</span>
-              </div>
-              {candidate.immigration_status && (
-                <span className="inline-block text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full mb-3">
-                  {statusLabels[candidate.immigration_status] || candidate.immigration_status}
-                </span>
-              )}
-              {candidate.bio && <p className="text-gray-600 text-sm line-clamp-2 mb-3">{candidate.bio}</p>}
-              {candidate.education && (
-                <p className="text-xs text-gray-500 mb-3">{candidate.education}</p>
-              )}
-              <div className="flex flex-wrap gap-1.5">
-                {candidate.skills.slice(0, 4).map((s) => (
-                  <span key={s} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
-                ))}
-                {candidate.skills.length > 4 && <span className="text-xs text-gray-400">+{candidate.skills.length - 4}</span>}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
