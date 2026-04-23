@@ -30,19 +30,26 @@ type PostedOpportunity = {
 const statusLabels: Record<string, string> = { owp: 'Open Work Permit', pr: 'Permanent Resident', student: 'Student Visa', citizen: 'Citizen' }
 const modeLabels: Record<string, string> = { remote: 'Remote', hybrid: 'Hybrid', onsite: 'On-site', any: 'Any' }
 
+function tieredSkillScore(matched: number): number {
+  if (matched >= 4) return 65
+  if (matched === 3) return 55
+  if (matched === 2) return 42
+  if (matched === 1) return 26
+  return 0
+}
+
 function computeMatch(candidate: Candidate, opp: PostedOpportunity): number {
-  let score = 0
   const required = opp.skills_required || []
+  let skillScore = 0
   if (required.length > 0) {
-    const matched = required.filter((r) => candidate.skills.some((s) => s.toLowerCase().includes(r.toLowerCase()) || r.toLowerCase().includes(s.toLowerCase())))
-    score += (matched.length / required.length) * 70
+    const matched = required.filter((r) => candidate.skills.some((s) => s.toLowerCase().includes(r.toLowerCase()) || r.toLowerCase().includes(s.toLowerCase()))).length
+    skillScore = tieredSkillScore(matched)
   } else {
-    score += 35
+    skillScore = 45
   }
-  if (candidate.work_preference === 'any' || candidate.work_preference === opp.work_mode) score += 20
-  else if (opp.work_mode === 'hybrid') score += 10
-  if (candidate.city && opp.city && candidate.city.toLowerCase() === opp.city.toLowerCase()) score += 10
-  return Math.round(Math.min(100, score))
+  const modeScore = (candidate.work_preference === 'any' || candidate.work_preference === opp.work_mode || opp.work_mode === 'hybrid') ? 20 : 5
+  const cityScore = candidate.city && opp.city && candidate.city.toLowerCase() === opp.city.toLowerCase() ? 15 : 0
+  return Math.round(Math.min(100, skillScore + modeScore + cityScore))
 }
 
 function MatchBar({ pct }: { pct: number }) {
