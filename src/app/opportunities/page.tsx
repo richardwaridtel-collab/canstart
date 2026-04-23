@@ -56,52 +56,62 @@ function detectExperienceFromTitle(title: string): string {
   return 'Mid Level'
 }
 
+function skillsMatch(skills: string[], text: string): number {
+  return skills.filter((s) => text.includes(s.toLowerCase())).length
+}
+
+function tieredSkillScore(matched: number, max = 65): number {
+  if (matched >= 4) return max
+  if (matched === 3) return Math.round(max * 0.85)
+  if (matched === 2) return Math.round(max * 0.65)
+  if (matched === 1) return Math.round(max * 0.40)
+  return 0
+}
+
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
   if (!seeker) return 0
   const required = opp.skills_required || []
   const resumeText = seeker.resume_text?.toLowerCase() || ''
   const hasResume = resumeText.length > 50
+  const source = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
 
-  let score = 0
+  let skillScore = 0
   if (required.length > 0) {
-    const matched = required.filter((r) => {
-      const rLower = r.toLowerCase()
-      // Check resume text first (more accurate), fallback to profile skills
-      if (hasResume) return resumeText.includes(rLower)
-      return seeker.skills.some((s) => s.toLowerCase().includes(rLower) || rLower.includes(s.toLowerCase()))
-    })
-    score += (matched.length / required.length) * 70
-  } else if (seeker.skills.length > 0 || hasResume) {
-    score += 35
+    const matched = required.filter((r) => source.includes(r.toLowerCase())).length
+    skillScore = tieredSkillScore(matched)
+  } else {
+    skillScore = 45 // open to anyone
   }
-  if (seeker.work_preference === 'any' || seeker.work_preference === opp.work_mode) score += 20
-  else if (opp.work_mode === 'hybrid') score += 10
-  if (seeker.city && opp.city && seeker.city.toLowerCase() === opp.city.toLowerCase()) score += 10
-  return Math.round(Math.min(100, score))
+
+  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === opp.work_mode || opp.work_mode === 'hybrid') ? 20 : 5
+  const cityScore = seeker.city && opp.city && seeker.city.toLowerCase() === opp.city.toLowerCase() ? 15 : 0
+  return Math.round(Math.min(100, skillScore + modeScore + cityScore))
 }
 
 function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
-  if (!seeker) return 0
+  if (!seeker || seeker.skills.length === 0) return 0
   const jobText = (job.title + ' ' + (job.description || '')).toLowerCase()
   const resumeText = seeker.resume_text?.toLowerCase() || ''
   const hasResume = resumeText.length > 50
 
-  let skillScore = 0
+  let matchedCount = 0
   if (hasResume) {
-    // Find skills from profile that are confirmed in resume AND appear in the job
-    const confirmedSkills = seeker.skills.filter((s) => resumeText.includes(s.toLowerCase()))
-    const skillsToCheck = confirmedSkills.length > 0 ? confirmedSkills : seeker.skills
-    const matched = skillsToCheck.filter((s) => jobText.includes(s.toLowerCase()))
-    skillScore = Math.min(70, skillsToCheck.length > 0 ? (matched.length / Math.min(skillsToCheck.length, 6)) * 70 : 0)
-  } else if (seeker.skills.length > 0) {
-    const matched = seeker.skills.filter((s) => jobText.includes(s.toLowerCase()))
-    skillScore = Math.min(70, (matched.length / Math.min(seeker.skills.length, 5)) * 70)
+    // Skills that appear in both resume AND job (high confidence)
+    const inResume = skillsMatch(seeker.skills, resumeText)
+    const inJob = skillsMatch(seeker.skills, jobText)
+    const inBoth = seeker.skills.filter((s) => resumeText.includes(s.toLowerCase()) && jobText.includes(s.toLowerCase())).length
+    // Weight: confirmed in both > just in job > just in resume
+    matchedCount = inBoth * 2 + Math.max(0, inJob - inBoth)
+    matchedCount = Math.min(seeker.skills.length, matchedCount)
+    // Give partial credit even if only resume or only job matches
+    if (matchedCount === 0 && (inResume > 0 || inJob > 0)) matchedCount = 0.5
+  } else {
+    matchedCount = skillsMatch(seeker.skills, jobText)
   }
 
-  let modeScore = 0
-  if (seeker.work_preference === 'any' || seeker.work_preference === job.work_mode) modeScore = 20
-  else if (job.work_mode === 'hybrid') modeScore = 10
-  const cityScore = seeker.city && job.city && seeker.city.toLowerCase() === job.city.toLowerCase() ? 10 : 0
+  const skillScore = tieredSkillScore(matchedCount)
+  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === job.work_mode || job.work_mode === 'hybrid') ? 20 : 5
+  const cityScore = seeker.city && job.city && seeker.city.toLowerCase() === job.city.toLowerCase() ? 15 : 0
   return Math.round(Math.min(100, skillScore + modeScore + cityScore))
 }
 
