@@ -117,117 +117,228 @@ function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): n
 
 // ─── ATS Keyword Analysis ────────────────────────────────────────────────────
 
-// Curated list of skills/tools recruiters commonly mention
 const KNOWN_SKILLS = [
-  'Excel','Word','PowerPoint','Outlook','SharePoint','Teams','Zoom','Slack','Google Workspace','G Suite',
-  'Salesforce','HubSpot','Marketo','Mailchimp','Hootsuite','Buffer','Sprout Social',
-  'Canva','Adobe','Photoshop','Illustrator','InDesign','Figma','Premiere',
-  'Tableau','Power BI','Looker','Google Analytics','Google Ads','Facebook Ads','LinkedIn Ads',
-  'SQL','Python','Java','JavaScript','TypeScript','React','HTML','CSS','WordPress','Shopify',
-  'QuickBooks','Xero','SAP','Oracle','Sage','NetSuite',
-  'Jira','Trello','Asana','Monday','Notion','Airtable','ClickUp',
-  'Agile','Scrum','Kanban','Lean','Six Sigma','Waterfall',
-  'PMP','PMBOK','ITIL','CPA','CFA','MBA','Google Analytics Certified',
-  'SEO','SEM','PPC','CRM','ERP','KPI','ROI','B2B','B2C','SaaS',
-  'bilingual','French','English','Spanish','Mandarin',
-  'project management','stakeholder management','change management','risk management',
-  'digital marketing','content marketing','email marketing','social media','copywriting','branding',
-  'data analysis','data visualization','business analysis','financial analysis','forecasting','budgeting',
-  'customer service','account management','client relations',
-  'recruitment','onboarding','performance management','payroll','HRIS',
-  'supply chain','logistics','procurement','inventory management',
-  'presentation','communication','leadership','teamwork','problem-solving','critical thinking',
+  // Office & Productivity
+  'Excel','Word','PowerPoint','Outlook','SharePoint','Teams','Access','Visio',
+  'Google Workspace','Google Docs','Google Sheets','Google Slides','Zoom','Slack','Skype',
+  // CRM & Marketing Platforms
+  'Salesforce','HubSpot','Marketo','Mailchimp','Constant Contact','Hootsuite','Buffer',
+  'Sprout Social','Pardot','ActiveCampaign','Zoho CRM','Pipedrive',
+  // Design
+  'Canva','Adobe Creative Suite','Photoshop','Illustrator','InDesign','Figma','Sketch',
+  'Premiere Pro','After Effects','Final Cut Pro',
+  // Analytics & Advertising
+  'Tableau','Power BI','Looker','Google Analytics','Google Ads','Facebook Ads',
+  'LinkedIn Ads','SEMrush','Ahrefs','Google Search Console','Google Tag Manager',
+  // Development
+  'SQL','Python','Java','JavaScript','TypeScript','React','HTML','CSS','PHP',
+  'R','VBA','Git','WordPress','Shopify',
+  // Finance & Accounting
+  'QuickBooks','Xero','Sage','SAP','Oracle','NetSuite','Workday','FreshBooks',
+  'financial modeling','GAAP','IFRS','accounts payable','accounts receivable',
+  // Project Management Tools
+  'Jira','Trello','Asana','Monday.com','Notion','Airtable','ClickUp','MS Project','Basecamp',
+  // Methodologies & Frameworks
+  'Agile','Scrum','Kanban','Lean','Six Sigma','Waterfall','PRINCE2',
+  // Certifications
+  'PMP','CAPM','PMBOK','ITIL','CPA','CFA','MBA','CHRP',
+  // Digital Marketing
+  'SEO','SEM','PPC','content marketing','digital marketing','email marketing',
+  'social media marketing','copywriting','brand management','influencer marketing','A/B testing',
+  // Business & Strategy
+  'CRM','ERP','KPI','ROI','B2B','B2C','SaaS','stakeholder management',
+  'change management','risk management','business development','strategic planning',
+  'project management','process improvement','cross-functional collaboration',
+  // Data & Analysis
+  'data analysis','data visualization','business analysis','financial analysis',
+  'forecasting','budgeting','variance analysis','reporting','dashboards',
+  // HR
+  'HRIS','talent acquisition','recruitment','onboarding','performance management',
+  'payroll','employee relations','workforce planning','benefits administration',
+  // Operations
+  'supply chain','logistics','procurement','inventory management','vendor management',
+  'operations management','quality assurance','compliance',
+  // Customer-facing
+  'customer service','account management','client relations','customer success',
+  'sales','business development','cold calling','CRM management',
+  // Languages
+  'bilingual','French','English','Spanish','Mandarin','Arabic',
+  // Soft skills recruiters list explicitly
+  'leadership','communication','presentation skills','problem-solving',
+  'critical thinking','attention to detail','time management',
 ]
 
-function extractKeywords(title: string, description: string, requiredSkills: string[] = []): string[] {
-  const found = new Set<string>()
-  const fullText = (title + ' ' + description).toLowerCase()
-
-  // 1. Required skills always first (most reliable)
-  requiredSkills.forEach((s) => { if (s.trim()) found.add(s.trim()) })
-
-  // 2. Check curated skills list against job text
-  KNOWN_SKILLS.forEach((skill) => {
-    if (fullText.includes(skill.toLowerCase())) found.add(skill)
-  })
-
-  // 3. Extract years-of-experience requirements as keywords (e.g. "3+ years marketing")
-  const expMatches = description.match(/\d\+?\s*years?\s+(?:of\s+)?(\w[\w\s]{2,25}?)(?:[,.]|$)/gi) || []
-  expMatches.forEach((m) => {
-    const term = m.replace(/\d\+?\s*years?\s+(?:of\s+)?/i, '').replace(/[,.]/g, '').trim()
-    if (term.length >= 3 && term.length <= 30) found.add(term)
-  })
-
-  return Array.from(found).filter((k) => k.length >= 2).slice(0, 25)
+// How to bridge common missing skills using existing experience
+const SKILL_BRIDGES: Record<string, string> = {
+  'salesforce': 'Any CRM (HubSpot, Zoho, Dynamics) is transferable. Highlight it + note you can ramp up on Salesforce.',
+  'hubspot': 'Mailchimp, Marketo or any marketing automation experience is directly relevant.',
+  'power bi': 'Tableau or Excel pivot/charts experience shows the same analytical thinking.',
+  'tableau': 'Power BI or Excel dashboard experience demonstrates equivalent data visualization skills.',
+  'google analytics': 'General web/marketing analytics experience qualifies. Free GA4 cert takes ~4 hours.',
+  'python': 'SQL, Excel (VBA/formulas), or R shows analytical programming aptitude.',
+  'sql': 'Excel data analysis or Access database experience bridges this; SQL basics take 2-3 weeks to learn.',
+  'pmp': 'Highlight project coordination, timelines managed, and budget ownership — you may qualify without the cert.',
+  'agile': 'Any iterative work, sprint-based delivery, or project coordination qualifies as agile experience.',
+  'scrum': 'Agile project experience, sprint planning, or daily standups — describe these explicitly.',
+  'seo': 'Content writing, keyword research, or digital marketing experience shows SEO awareness.',
+  'financial modeling': 'Excel skills combined with financial reporting experience is a strong bridge.',
+  'budgeting': 'Any experience managing costs, tracking expenses, or P&L responsibility counts.',
+  'bilingual': 'Even conversational proficiency in a second language is worth noting.',
+  'french': 'Basic French significantly improves candidacy in many Canadian markets. Mention any level.',
+  'cross-functional collaboration': 'Describe any projects where you worked with multiple departments.',
+  'stakeholder management': 'Client communication, executive reporting, or vendor relations all qualify.',
+  'data analysis': 'Excel pivot tables, reporting, or any quantitative work demonstrates data analysis skills.',
+  'change management': 'Any experience implementing new processes or systems is relevant.',
+  'procurement': 'Vendor relations, purchasing, or supplier management experience bridges this gap.',
 }
 
-function computeATSMatch(resumeText: string, keywords: string[]): { matched: string[]; missing: string[]; pct: number } {
-  if (!keywords.length) return { matched: [], missing: [], pct: 0 }
-  const lower = resumeText.toLowerCase()
-  const matched = keywords.filter((k) => lower.includes(k.toLowerCase()))
-  const missing = keywords.filter((k) => !lower.includes(k.toLowerCase()))
-  return { matched, missing, pct: Math.round((matched.length / keywords.length) * 100) }
+// Extract keywords from job using curated list + requirement patterns
+function extractJobKeywords(title: string, description: string, requiredSkills: string[] = []): Array<{ keyword: string; required: boolean }> {
+  const found = new Map<string, boolean>() // keyword → isRequired
+  const fullText = (title + ' ' + description).toLowerCase()
+
+  // 1. Explicit required skills (highest confidence)
+  requiredSkills.forEach((s) => { if (s.trim()) found.set(s.trim(), true) })
+
+  // 2. Curated skills detected in job text
+  KNOWN_SKILLS.forEach((skill) => {
+    if (fullText.includes(skill.toLowerCase()) && !found.has(skill)) {
+      // Check if mentioned in a "required/must" context
+      const isRequired = new RegExp(`(?:required|must|essential)[^.]{0,60}${skill.toLowerCase()}|${skill.toLowerCase()}[^.]{0,60}(?:required|must|essential)`, 'i').test(description)
+      found.set(skill, isRequired)
+    }
+  })
+
+  // 3. Extract requirement phrases: "experience with X", "knowledge of X", "proficiency in X"
+  const patterns = [
+    /experience (?:in|with|using)\s+([a-zA-Z][a-zA-Z\s+#.]{2,28}?)(?:\s*[,;(\n]|$)/gi,
+    /knowledge of\s+([a-zA-Z][a-zA-Z\s+#.]{2,28}?)(?:\s*[,;(\n]|$)/gi,
+    /proficiency (?:in|with)\s+([a-zA-Z][a-zA-Z\s+#.]{2,28}?)(?:\s*[,;(\n]|$)/gi,
+    /familiar(?:ity)? with\s+([a-zA-Z][a-zA-Z\s+#.]{2,28}?)(?:\s*[,;(\n]|$)/gi,
+    /(?:strong|proven|demonstrated)\s+([a-zA-Z][a-zA-Z\s]{2,28}?)\s+skills?/gi,
+  ]
+  patterns.forEach((re) => {
+    let m
+    re.lastIndex = 0
+    while ((m = re.exec(description)) !== null) {
+      const term = m[1].trim().replace(/\s+/g, ' ')
+      if (term.length >= 3 && term.length <= 35 && !found.has(term)) {
+        found.set(term, false)
+      }
+    }
+  })
+
+  return Array.from(found.entries())
+    .map(([keyword, required]) => ({ keyword, required }))
+    .slice(0, 28)
 }
 
 function ATSPanel({ resumeText, jobTitle, jobDescription, requiredSkills }: {
   resumeText: string; jobTitle: string; jobDescription: string; requiredSkills?: string[]
 }) {
-  const keywords = extractKeywords(jobTitle, jobDescription, requiredSkills)
+  const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+  if (!keywords.length) return null
 
+  // No resume — show keywords only, prompt to upload
   if (!resumeText || resumeText.length < 50) {
     return (
       <div className="mt-3 pt-3 border-t border-dashed border-purple-100">
-        <div className="flex items-center gap-1.5 mb-2">
-          <Target size={12} className="text-purple-400" />
-          <span className="text-xs font-semibold text-gray-600">ATS Keyword Match</span>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+            <Target size={12} className="text-purple-500" /> ATS Keywords for this role
+          </span>
+          <a href="/profile/setup" className="text-[11px] text-purple-600 hover:underline font-medium">Upload resume to check match →</a>
         </div>
-        <div className="bg-purple-50 rounded-lg p-3 text-xs text-purple-700">
-          <a href="/profile/setup" className="underline font-medium">Upload your resume</a> to see which keywords from this job are in your resume and what&apos;s missing.
-          {keywords.length > 0 && (
-            <div className="mt-2">
-              <p className="text-purple-500 mb-1">Keywords recruiters are looking for:</p>
-              <div className="flex flex-wrap gap-1">
-                {keywords.slice(0, 10).map((k) => <span key={k} className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{k}</span>)}
-              </div>
-            </div>
-          )}
+        <div className="flex flex-wrap gap-1">
+          {keywords.map(({ keyword, required }) => (
+            <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+              {required && '★ '}{keyword}
+            </span>
+          ))}
         </div>
+        <p className="text-[10px] text-gray-400 mt-2">★ = explicitly required by employer</p>
       </div>
     )
   }
 
-  if (!keywords.length) return null
-  const { matched, missing, pct } = computeATSMatch(resumeText, keywords)
-  const barColor = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-red-400'
-  const textColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-red-500'
-  const bgColor = pct >= 70 ? 'bg-green-50' : pct >= 40 ? 'bg-yellow-50' : 'bg-red-50'
+  const lower = resumeText.toLowerCase()
+  const matched = keywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase()))
+  const missing = keywords.filter(({ keyword }) => !lower.includes(keyword.toLowerCase()))
+  const pct = Math.round((matched.length / keywords.length) * 100)
+
+  // Suitability verdict
+  const verdict = pct >= 70
+    ? { label: 'Strong Match', sub: 'Your resume closely aligns with this role.', color: 'bg-green-50 border-green-200 text-green-800' }
+    : pct >= 45
+    ? { label: 'Good Match', sub: 'You meet most requirements. Address the gaps below.', color: 'bg-yellow-50 border-yellow-200 text-yellow-800' }
+    : pct >= 25
+    ? { label: 'Partial Match', sub: 'Transferable experience may bridge some gaps — see tips below.', color: 'bg-orange-50 border-orange-200 text-orange-800' }
+    : { label: 'Stretch Role', sub: 'Significant gaps exist. Consider this a target role to work towards.', color: 'bg-red-50 border-red-200 text-red-800' }
+
+  const barColor = pct >= 70 ? 'bg-green-500' : pct >= 45 ? 'bg-yellow-400' : pct >= 25 ? 'bg-orange-400' : 'bg-red-400'
+
+  // Find bridgeable gaps
+  const bridgeable = missing.filter(({ keyword }) => SKILL_BRIDGES[keyword.toLowerCase()])
+  const hardGaps = missing.filter(({ keyword }) => !SKILL_BRIDGES[keyword.toLowerCase()])
 
   return (
-    <div className="mt-3 pt-3 border-t border-dashed border-purple-100">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-          <Target size={12} className="text-purple-500" /> ATS Keyword Match
-        </span>
-        <span className={`text-xs font-bold ${textColor} ${bgColor} px-2 py-0.5 rounded-full`}>
-          {pct}% · {matched.length}/{keywords.length} keywords
-        </span>
+    <div className="mt-3 pt-3 border-t border-dashed border-purple-100 space-y-3">
+      {/* Header + verdict */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+            <Target size={12} className="text-purple-500" /> ATS Keyword Match
+          </span>
+          <span className="text-xs font-bold text-gray-500">{pct}% · {matched.length}/{keywords.length} keywords</span>
+        </div>
+        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
+          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+        </div>
+        <div className={`rounded-lg border px-3 py-2 ${verdict.color}`}>
+          <p className="text-xs font-bold">{verdict.label}</p>
+          <p className="text-[11px] mt-0.5 opacity-90">{verdict.sub}</p>
+        </div>
       </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-3">
-        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
-      </div>
+
+      {/* Found keywords */}
       {matched.length > 0 && (
-        <div className="mb-2.5">
-          <p className="text-[10px] text-green-600 uppercase tracking-wide font-semibold mb-1.5">✓ Found in your resume</p>
+        <div>
+          <p className="text-[10px] text-green-600 uppercase tracking-wide font-semibold mb-1.5">✓ Keywords found in your resume ({matched.length})</p>
           <div className="flex flex-wrap gap-1">
-            {matched.map((k) => <span key={k} className="text-[11px] bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-medium">{k}</span>)}
+            {matched.map(({ keyword, required }) => (
+              <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${required ? 'bg-green-100 text-green-800 border-green-300' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                {required && '★ '}{keyword}
+              </span>
+            ))}
           </div>
         </div>
       )}
-      {missing.length > 0 && (
+
+      {/* Hard gaps — not bridgeable */}
+      {hardGaps.length > 0 && (
         <div>
-          <p className="text-[10px] text-red-500 uppercase tracking-wide font-semibold mb-1.5">✗ Missing — add these to your resume</p>
+          <p className="text-[10px] text-red-500 uppercase tracking-wide font-semibold mb-1.5">✗ Missing keywords — add to your resume ({hardGaps.length})</p>
           <div className="flex flex-wrap gap-1">
-            {missing.map((k) => <span key={k} className="text-[11px] bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">{k}</span>)}
+            {hardGaps.map(({ keyword, required }) => (
+              <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-red-100 text-red-700 border-red-300 font-semibold' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                {required && '★ '}{keyword}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bridgeable gaps with tips */}
+      {bridgeable.length > 0 && (
+        <div>
+          <p className="text-[10px] text-amber-600 uppercase tracking-wide font-semibold mb-1.5">💡 Bridgeable gaps — you can address these ({bridgeable.length})</p>
+          <div className="space-y-1.5">
+            {bridgeable.map(({ keyword }) => (
+              <div key={keyword} className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                <p className="text-[11px] font-semibold text-amber-800">{keyword}</p>
+                <p className="text-[11px] text-amber-700 mt-0.5">{SKILL_BRIDGES[keyword.toLowerCase()]}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
