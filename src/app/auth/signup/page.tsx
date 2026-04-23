@@ -102,7 +102,8 @@ function SignUpForm() {
 
       router.push('/profile/setup')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
+      const msg = err instanceof Error ? err.message : (err as { message?: string })?.message || JSON.stringify(err)
+      setError(msg || 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
