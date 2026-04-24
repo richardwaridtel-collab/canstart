@@ -56,6 +56,94 @@ function detectExperienceFromTitle(title: string): string {
   return 'Mid Level'
 }
 
+// Generic soft skills that appear in every resume/job — exclude from keyword matching
+// to prevent false cross-domain matches
+const SOFT_SKILLS_EXCLUDED = new Set([
+  'leadership','communication','presentation skills','problem-solving','critical thinking',
+  'attention to detail','time management','teamwork','collaboration','adaptability',
+  'organizational skills','interpersonal skills','written communication','verbal communication',
+])
+
+// Domain signals — used to detect job domain and candidate domain
+const DOMAIN_SIGNALS: Record<string, string[]> = {
+  tech: [
+    '.net','c#','java','python','javascript','typescript','react','angular','vue','node.js',
+    'sql','aws','azure','gcp','docker','kubernetes','php','ruby','swift','kotlin','html','css',
+    'software developer','software engineer','backend','frontend','full stack','fullstack',
+    'devops','cloud','database','programming','api','git','linux','microservices',
+    'machine learning','data science','artificial intelligence','mobile developer',
+  ],
+  marketing: [
+    'seo','sem','ppc','content marketing','digital marketing','social media marketing',
+    'email marketing','influencer marketing','brand management','copywriting','advertising',
+    'marketing campaign','google ads','facebook ads','hubspot','mailchimp','hootsuite',
+    'marketing manager','marketing coordinator','communications','public relations','pr ',
+    'media relations','content strategy','google analytics','a/b testing',
+  ],
+  finance: [
+    'accounting','financial','cpa','gaap','ifrs','bookkeeping','audit','tax',
+    'financial modeling','accounts payable','accounts receivable','quickbooks','xero',
+    'budgeting','forecasting','financial analyst','controller','treasurer','cfo',
+    'investment','portfolio','banking','insurance','actuarial',
+  ],
+  hr: [
+    'recruitment','talent acquisition','hris','human resources','onboarding','payroll',
+    'employee relations','workforce planning','benefits administration','hr manager',
+    'hr coordinator','talent management','performance management','compensation',
+    'labour relations','organizational development',
+  ],
+  sales: [
+    'sales','business development','account executive','account manager','cold calling',
+    'pipeline','quota','revenue target','crm','lead generation','b2b sales','b2c sales',
+    'sales manager','territory','client acquisition','closing deals',
+  ],
+  data: [
+    'data analysis','data analyst','data science','data engineer','power bi','tableau',
+    'machine learning','statistics','python','r ','pandas','data warehouse','etl',
+    'business intelligence','analytics','big data','looker','sql server',
+  ],
+  operations: [
+    'supply chain','logistics','procurement','inventory management','operations manager',
+    'quality assurance','process improvement','lean','six sigma','warehouse',
+    'vendor management','facilities','manufacturing','production',
+  ],
+  design: [
+    'graphic design','ui design','ux design','product design','web design','figma','sketch',
+    'photoshop','illustrator','indesign','canva','adobe','motion graphics','visual design',
+    'brand design','typography','user experience','user interface',
+  ],
+}
+
+function detectDomain(text: string): string {
+  const lower = text.toLowerCase()
+  const scores: Record<string, number> = {}
+  Object.entries(DOMAIN_SIGNALS).forEach(([domain, signals]) => {
+    scores[domain] = signals.filter((s) => lower.includes(s)).length
+  })
+  const top = Object.entries(scores).sort((a, b) => b[1] - a[1])
+  return top[0][1] > 0 ? top[0][0] : 'general'
+}
+
+function computeDomainScore(candidateText: string, jobText: string): number {
+  const jobDomain = detectDomain(jobText)
+  const candidateDomain = detectDomain(candidateText)
+  if (jobDomain === 'general' || candidateDomain === 'general') return 12 // neutral
+  if (jobDomain === candidateDomain) return 20 // same domain
+  // Adjacent domains (partial credit)
+  const adjacent: Record<string, string[]> = {
+    tech: ['data'],
+    data: ['tech', 'finance'],
+    sales: ['marketing'],
+    marketing: ['sales', 'design'],
+    finance: ['data', 'operations'],
+    hr: ['operations'],
+    design: ['marketing'],
+    operations: ['finance', 'hr'],
+  }
+  if (adjacent[jobDomain]?.includes(candidateDomain)) return 8
+  return 0 // completely different domain — hard penalty
+}
+
 function detectSeekerLevel(resumeText: string): string {
   if (!resumeText || resumeText.length < 50) return 'Mid Level'
   const yearsMatches = [...resumeText.matchAll(/(\d{1,2})\s*\+?\s*years?/gi)]
@@ -69,11 +157,16 @@ function detectSeekerLevel(resumeText: string): string {
 }
 
 /**
- * Unified 4-factor match score (replaces both computeCanstartMatch and computeExternalMatch)
- * Factor 1 — Keyword & skills coverage   (50 pts): how many job keywords appear in resume/skills
- * Factor 2 — Experience level alignment  (20 pts): job level vs estimated seeker level
- * Factor 3 — Work mode fit              (15 pts): remote/hybrid/onsite preference
- * Factor 4 — Location fit               (15 pts): city match
+ * Unified 5-factor match score
+ * Factor 1 — Domain-specific keyword coverage  (55 pts): soft skills excluded
+ * Factor 2 — Domain / industry alignment       (20 pts): heavy cross-domain penalty
+ * Factor 3 — Experience level alignment        (15 pts)
+ * Factor 4 — Work mode fit                     ( 7 pts)
+ * Factor 5 — Location fit                      ( 3 pts)
+ * Total: 100 pts
+ *
+ * A cross-domain candidate (e.g. marketer vs tech job) will score max ~25
+ * even with perfect location/mode/experience — which is correct.
  */
 function computeJobMatch(
   seeker: SeekerProfile | null,
@@ -88,9 +181,11 @@ function computeJobMatch(
   const resumeText = seeker.resume_text?.toLowerCase() || ''
   const hasResume = resumeText.length > 50
   const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
+  const jobText = (jobTitle + ' ' + jobDescription).toLowerCase()
 
-  // ── Factor 1: Keyword coverage (50 pts) ─────────────────────────────────────
+  // ── Factor 1: Domain-specific keyword coverage (55 pts) ──────────────────────
   const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+    .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
   let weightedMatched = 0
   let weightedTotal = 0
   keywords.forEach(({ keyword, required }) => {
@@ -98,30 +193,31 @@ function computeJobMatch(
     weightedTotal += weight
     if (candidateText.includes(keyword.toLowerCase())) weightedMatched += weight
   })
-  // Also check explicit required skills directly
-  const explicitRequired = requiredSkills.filter(Boolean)
-  explicitRequired.forEach((s) => {
-    if (!keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase())) {
+  requiredSkills.filter(Boolean).forEach((s) => {
+    if (!keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase()) && !SOFT_SKILLS_EXCLUDED.has(s.toLowerCase())) {
       weightedTotal += 2
       if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
     }
   })
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 50) : 25
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 55) : 20
 
-  // ── Factor 2: Experience level alignment (20 pts) ────────────────────────────
+  // ── Factor 2: Domain / industry alignment (20 pts) ───────────────────────────
+  const domainScore = computeDomainScore(candidateText, jobText)
+
+  // ── Factor 3: Experience level alignment (15 pts) ────────────────────────────
   const jobLevel = detectExperienceFromTitle(jobTitle)
   const seekerLevel = detectSeekerLevel(hasResume ? resumeText : '')
   const levels = ['Entry Level', 'Mid Level', 'Senior Level']
   const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
-  const levelScore = diff === 0 ? 20 : diff === 1 ? 12 : 4
+  const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
 
-  // ── Factor 3: Work mode fit (15 pts) ─────────────────────────────────────────
-  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === workMode || workMode === 'hybrid') ? 15 : 4
+  // ── Factor 4: Work mode fit (7 pts) ──────────────────────────────────────────
+  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === workMode || workMode === 'hybrid') ? 7 : 2
 
-  // ── Factor 4: Location fit (15 pts) ──────────────────────────────────────────
-  const cityScore = seeker.city && jobCity && seeker.city.toLowerCase() === jobCity.toLowerCase() ? 15 : 0
+  // ── Factor 5: Location fit (3 pts) ───────────────────────────────────────────
+  const cityScore = seeker.city && jobCity && seeker.city.toLowerCase() === jobCity.toLowerCase() ? 3 : 0
 
-  return Math.round(Math.min(100, keywordScore + levelScore + modeScore + cityScore))
+  return Math.round(Math.min(100, keywordScore + domainScore + levelScore + modeScore + cityScore))
 }
 
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
@@ -306,17 +402,19 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
   // Unified overall score
   const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity)
 
-  // Score breakdown factors (mirrors computeJobMatch logic, for display)
-  const weightedMatched = matched.reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const weightedTotal = keywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 50) : 25
+  // Score breakdown (mirrors computeJobMatch logic, for display)
+  const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
+  const weightedMatched = domainKeywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase())).reduce((s, { required }) => s + (required ? 2 : 1), 0)
+  const weightedTotal = domainKeywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 55) : 20
+  const domainScore = computeDomainScore(lower, (jobTitle + ' ' + jobDescription).toLowerCase())
   const jobLevel = detectExperienceFromTitle(jobTitle)
   const seekerLevel = detectSeekerLevel(resumeText)
   const levels = ['Entry Level', 'Mid Level', 'Senior Level']
   const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
-  const levelScore = diff === 0 ? 20 : diff === 1 ? 12 : 4
-  const modeScore = seekerProfile ? ((seekerProfile.work_preference === 'any' || seekerProfile.work_preference === workMode || workMode === 'hybrid') ? 15 : 4) : 0
-  const cityScore = seekerProfile?.city && jobCity && seekerProfile.city.toLowerCase() === jobCity.toLowerCase() ? 15 : 0
+  const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
+  const modeScore = seekerProfile ? ((seekerProfile.work_preference === 'any' || seekerProfile.work_preference === workMode || workMode === 'hybrid') ? 7 : 2) : 0
+  const cityScore = seekerProfile?.city && jobCity && seekerProfile.city.toLowerCase() === jobCity.toLowerCase() ? 3 : 0
 
   // Application strategy
   const strategy = overallPct >= 75
@@ -352,10 +450,10 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
         {/* Score breakdown */}
         <div className="grid grid-cols-2 gap-1.5 mb-2">
           {[
-            { label: 'Keywords & Skills', score: keywordScore, max: 50 },
-            { label: 'Experience Level', score: levelScore, max: 20 },
-            { label: 'Work Mode', score: modeScore, max: 15 },
-            { label: 'Location', score: cityScore, max: 15 },
+            { label: 'Keywords & Skills', score: keywordScore, max: 55 },
+            { label: 'Industry Alignment', score: domainScore, max: 20 },
+            { label: 'Experience Level', score: levelScore, max: 15 },
+            { label: 'Mode & Location', score: modeScore + cityScore, max: 10 },
           ].map(({ label, score, max }) => (
             <div key={label} className="bg-gray-50 rounded-lg px-2 py-1.5">
               <div className="flex justify-between items-center">
