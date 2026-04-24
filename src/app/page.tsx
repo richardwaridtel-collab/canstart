@@ -42,17 +42,17 @@ const features = [
 ]
 
 const howItWorksSeeker = [
-  { step: '1', title: 'Create Your Profile', desc: 'Add your skills, experience, education, and location preferences.' },
-  { step: '2', title: 'Browse Opportunities', desc: 'Discover volunteer and micro-internship positions matched to your profile.' },
-  { step: '3', title: 'Apply with One Click', desc: 'Express interest and connect directly with the business.' },
-  { step: '4', title: 'Gain Canadian Experience', desc: 'Complete the opportunity, earn a verified review, and advance your career.' },
+  { step: '1', title: 'Create Your Profile', desc: 'Upload your resume, add your skills and immigration status, and set your work preferences.' },
+  { step: '2', title: 'Browse 400+ Canadian Jobs', desc: 'Search live jobs updated daily. Filter by city, category, date posted, and work mode.' },
+  { step: '3', title: 'See Your Match Score', desc: 'Get an instant ATS keyword analysis — see exactly how your resume fits each job and what\'s missing.' },
+  { step: '4', title: 'Tailor, Apply & Track', desc: 'Use the Resume Builder to tailor your resume to any job, then apply and track every application in one place.' },
 ]
 
 const howItWorksEmployer = [
-  { step: '1', title: 'Register Your Business', desc: 'Complete our quick verification process to build trust with candidates.' },
-  { step: '2', title: 'Post an Opportunity', desc: 'Describe the role, required skills, and duration — free to post.' },
-  { step: '3', title: 'Review Matched Candidates', desc: 'Browse profiles of skilled newcomers matched to your requirements.' },
-  { step: '4', title: 'Grow Your Team', desc: 'Connect with motivated talent eager to contribute to your business.' },
+  { step: '1', title: 'Register Your Business', desc: 'Create your company profile to post verified opportunities visible to skilled newcomers across Canada.' },
+  { step: '2', title: 'Post an Opportunity', desc: 'Describe the role, required skills, and work type — free to post, live within minutes.' },
+  { step: '3', title: 'Review Applications', desc: 'See who applied, review candidate profiles and resumes, and update application status in real time.' },
+  { step: '4', title: 'Grow Your Team', desc: 'Connect directly with motivated newcomer talent who are ready and eager to contribute.' },
 ]
 
 const cities = ['Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
