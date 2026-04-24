@@ -104,13 +104,24 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
       "institution": "School Name",
       "year": "Year"
     }
-  ] or null
+  ] or null,
+  "scores": {
+    "resumeRating": 8,
+    "matchPercentage": 74,
+    "ratingReasons": ["reason1", "reason2", "reason3"],
+    "matchGaps": ["gap1", "gap2"]
+  }
 }
 
 For contact: extract name, city, province, phone, email, and LinkedIn from the original resume. Set any missing fields to null.
 For competencies: choose exactly 9 or 12 skills matching the job description and candidate background.
 For certifications and tools: only include if present in the original resume. Otherwise set to null.
-For education: only include if mentioned in the original resume. Otherwise set to null.`
+For education: only include if mentioned in the original resume. Otherwise set to null.
+For scores:
+- resumeRating: rate the overall quality of the tailored resume out of 10. Consider bullet strength, specificity, numbers used, writing quality, and how well it presents the candidate.
+- matchPercentage: percentage match between the tailored resume and the job description (0-100). Consider keyword alignment, required skills covered, experience level match, and role relevance.
+- ratingReasons: 2-3 short sentences explaining what makes the resume strong (what scored well).
+- matchGaps: 1-3 short phrases identifying what's missing or weak in the match (skills/experience in the job description not well covered by the resume). If match is above 85%, set to [].`
 
 export async function POST(request: Request) {
   try {

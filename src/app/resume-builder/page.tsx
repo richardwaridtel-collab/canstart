@@ -31,6 +31,13 @@ type ResumeContact = {
   linkedin: string | null
 }
 
+type ResumeScores = {
+  resumeRating: number
+  matchPercentage: number
+  ratingReasons: string[]
+  matchGaps: string[]
+}
+
 type GeneratedResume = {
   contact: ResumeContact
   summary: string
@@ -40,6 +47,7 @@ type GeneratedResume = {
   certifications: string[] | null
   tools: string[] | null
   education: ResumeEducation[] | null
+  scores?: ResumeScores
 }
 
 export default function ResumeBuilderPage() {
@@ -621,6 +629,67 @@ export default function ResumeBuilderPage() {
                 </button>
               </div>
             </div>
+
+            {/* Scores */}
+            {resume.scores && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                {/* Resume Rating */}
+                <div className="bg-white border border-gray-200 rounded-2xl p-5">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">Resume Quality Rating</p>
+                  <div className="flex items-end gap-2 mb-3">
+                    <span className={`text-5xl font-black ${resume.scores.resumeRating >= 8 ? 'text-green-500' : resume.scores.resumeRating >= 6 ? 'text-yellow-500' : 'text-red-500'}`}>
+                      {resume.scores.resumeRating}
+                    </span>
+                    <span className="text-xl text-gray-300 font-semibold mb-1">/ 10</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full mb-4 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${resume.scores.resumeRating >= 8 ? 'bg-green-500' : resume.scores.resumeRating >= 6 ? 'bg-yellow-400' : 'bg-red-500'}`}
+                      style={{ width: `${resume.scores.resumeRating * 10}%` }}
+                    />
+                  </div>
+                  {resume.scores.ratingReasons?.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs text-gray-600 mb-1.5">
+                      <CheckCircle size={12} className="text-green-500 flex-shrink-0 mt-0.5" />
+                      <span>{r}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Job Match */}
+                <div className="bg-white border border-gray-200 rounded-2xl p-5">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 mb-3">Job Description Match</p>
+                  <div className="flex items-end gap-2 mb-3">
+                    <span className={`text-5xl font-black ${resume.scores.matchPercentage >= 75 ? 'text-green-500' : resume.scores.matchPercentage >= 55 ? 'text-yellow-500' : 'text-red-500'}`}>
+                      {resume.scores.matchPercentage}
+                    </span>
+                    <span className="text-xl text-gray-300 font-semibold mb-1">%</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full mb-4 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${resume.scores.matchPercentage >= 75 ? 'bg-green-500' : resume.scores.matchPercentage >= 55 ? 'bg-yellow-400' : 'bg-red-500'}`}
+                      style={{ width: `${resume.scores.matchPercentage}%` }}
+                    />
+                  </div>
+                  {resume.scores.matchGaps && resume.scores.matchGaps.length > 0 ? (
+                    <>
+                      <p className="text-xs font-semibold text-gray-400 mb-1.5">Gaps to address:</p>
+                      {resume.scores.matchGaps.map((g, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs text-gray-600 mb-1.5">
+                          <AlertCircle size={12} className="text-yellow-500 flex-shrink-0 mt-0.5" />
+                          <span>{g}</span>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs text-green-600">
+                      <CheckCircle size={12} />
+                      <span>Strong match — no major gaps found.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden print:shadow-none print:border-none" id="resume-print">
 
