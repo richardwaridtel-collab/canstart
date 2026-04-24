@@ -201,12 +201,235 @@ export default function ResumeBuilderPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const handleDownload = () => {
-    const blob = new Blob([getResumeText()], { type: 'text/plain' })
+  const handleDownloadPDF = async () => {
+    if (!resume) return
+    const { jsPDF } = await import('jspdf')
+    const doc = new jsPDF({ unit: 'mm', format: 'letter' })
+    const pageW = 215.9
+    const margin = 18
+    const contentW = pageW - margin * 2
+    let y = 22
+
+    const checkPage = (needed: number) => { if (y + needed > 268) { doc.addPage(); y = 22 } }
+
+    const sectionHeader = (title: string) => {
+      checkPage(14)
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(180, 20, 20)
+      doc.text(title.toUpperCase(), margin, y); y += 2
+      doc.setDrawColor(220, 220, 220); doc.line(margin, y, pageW - margin, y); y += 5
+      doc.setTextColor(0); doc.setFont('helvetica', 'normal')
+    }
+
+    // Name
+    doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(0)
+    doc.text(resume.contact?.name || '', pageW / 2, y, { align: 'center' }); y += 7
+
+    // Contact
+    if (resume.contact) {
+      const parts = [
+        [resume.contact.city, resume.contact.province].filter(Boolean).join(', '),
+        resume.contact.phone, resume.contact.email, resume.contact.linkedin
+      ].filter(Boolean).join('  ·  ')
+      if (parts) {
+        doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(90)
+        doc.text(parts, pageW / 2, y, { align: 'center' }); y += 9
+        doc.setTextColor(0)
+      }
+    }
+
+    // Summary
+    sectionHeader('Professional Summary')
+    doc.setFontSize(10)
+    const sumLines = doc.splitTextToSize(resume.summary, contentW)
+    doc.text(sumLines, margin, y); y += sumLines.length * 5 + 7
+
+    // Competencies
+    sectionHeader('Core Competencies')
+    const cols = resume.competencies.length === 9 ? 3 : 4
+    const colW = contentW / cols
+    for (let i = 0; i < resume.competencies.length; i += cols) {
+      checkPage(6)
+      resume.competencies.slice(i, i + cols).forEach((s, j) => {
+        doc.setFontSize(9.5); doc.text(`• ${s}`, margin + j * colW, y)
+      }); y += 5.5
+    }
+    y += 4
+
+    // Experience
+    sectionHeader('Work Experience')
+    resume.experience.forEach((role) => {
+      checkPage(18)
+      doc.setFontSize(10.5); doc.setFont('helvetica', 'bold')
+      doc.text(role.title, margin, y); y += 5
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80)
+      doc.text(`${role.company}  ·  ${role.location}  ·  ${role.dates}`, margin, y); y += 5
+      doc.setTextColor(0)
+      role.bullets.forEach((b) => {
+        checkPage(10)
+        const bLines = doc.splitTextToSize(`• ${b}`, contentW - 2)
+        doc.setFontSize(9.5); doc.text(bLines, margin, y); y += bLines.length * 4.8 + 1.5
+      }); y += 4
+    })
+
+    // Certifications
+    if (resume.certifications?.length) {
+      sectionHeader('Professional Training & Certifications')
+      resume.certifications.forEach((c) => { checkPage(6); doc.setFontSize(9.5); doc.text(`• ${c}`, margin, y); y += 5.5 })
+      y += 2
+    }
+
+    // Tools
+    if (resume.tools?.length) {
+      sectionHeader('Tools Proficiency')
+      const tLines = doc.splitTextToSize(resume.tools.join('  ·  '), contentW)
+      doc.setFontSize(9.5); doc.text(tLines, margin, y); y += tLines.length * 5 + 4
+    }
+
+    // Education
+    if (resume.education?.length) {
+      sectionHeader('Education')
+      resume.education.forEach((e) => {
+        checkPage(10)
+        doc.setFontSize(10); doc.setFont('helvetica', 'bold')
+        doc.text(e.degree, margin, y); y += 5
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80)
+        doc.text(`${e.institution}${e.year ? ` (${e.year})` : ''}`, margin, y)
+        doc.setTextColor(0); y += 6
+      })
+    }
+
+    const fname = resume.contact?.name ? resume.contact.name.replace(/\s+/g, '_') : 'Resume'
+    doc.save(`${fname}_Tailored.pdf`)
+  }
+
+  const handleDownloadDOCX = async () => {
+    if (!resume) return
+    const {
+      Document, Paragraph, TextRun, Packer, AlignmentType,
+      BorderStyle, HeadingLevel, TabStopType
+    } = await import('docx')
+
+    void HeadingLevel; void TabStopType
+
+    const RED = 'B41414'
+    const GRAY = '666666'
+    const BLACK = '1a1a1a'
+
+    const sectionPara = (title: string) => new Paragraph({
+      spacing: { before: 280, after: 80 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'DDDDDD', space: 3 } },
+      children: [new TextRun({ text: title.toUpperCase(), bold: true, size: 18, color: RED, font: 'Calibri' })]
+    })
+
+    const children = []
+
+    // Name
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 60 },
+      children: [new TextRun({ text: resume.contact?.name || '', bold: true, size: 32, font: 'Calibri', color: BLACK })]
+    }))
+
+    // Contact line
+    if (resume.contact) {
+      const parts = [
+        [resume.contact.city, resume.contact.province].filter(Boolean).join(', '),
+        resume.contact.phone, resume.contact.email, resume.contact.linkedin
+      ].filter(Boolean)
+      if (parts.length) {
+        const runs: InstanceType<typeof TextRun>[] = []
+        parts.forEach((p, i) => {
+          runs.push(new TextRun({ text: p!, size: 18, font: 'Calibri', color: GRAY }))
+          if (i < parts.length - 1) runs.push(new TextRun({ text: '  ·  ', size: 18, color: 'AAAAAA', font: 'Calibri' }))
+        })
+        children.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: runs }))
+      }
+    }
+
+    // Summary
+    children.push(sectionPara('Professional Summary'))
+    children.push(new Paragraph({
+      spacing: { after: 200 },
+      children: [new TextRun({ text: resume.summary, size: 20, font: 'Calibri', color: BLACK })]
+    }))
+
+    // Competencies
+    children.push(sectionPara('Core Competencies'))
+    const cols = resume.competencies.length === 9 ? 3 : 4
+    for (let i = 0; i < resume.competencies.length; i += cols) {
+      const row = resume.competencies.slice(i, i + cols)
+      children.push(new Paragraph({
+        spacing: { after: 60 },
+        children: row.map((s, j) => new TextRun({
+          text: `• ${s}${j < row.length - 1 ? '          ' : ''}`,
+          size: 19, font: 'Calibri', color: BLACK
+        }))
+      }))
+    }
+
+    // Experience
+    children.push(sectionPara('Work Experience'))
+    resume.experience.forEach((role) => {
+      children.push(new Paragraph({
+        spacing: { before: 120, after: 40 },
+        children: [new TextRun({ text: role.title, bold: true, size: 21, font: 'Calibri', color: BLACK })]
+      }))
+      children.push(new Paragraph({
+        spacing: { after: 80 },
+        children: [new TextRun({ text: `${role.company}  ·  ${role.location}  ·  ${role.dates}`, size: 18, font: 'Calibri', color: GRAY })]
+      }))
+      role.bullets.forEach((b) => {
+        children.push(new Paragraph({
+          spacing: { after: 60 },
+          children: [new TextRun({ text: `• ${b}`, size: 19, font: 'Calibri', color: BLACK })]
+        }))
+      })
+    })
+
+    // Certifications
+    if (resume.certifications?.length) {
+      children.push(sectionPara('Professional Training & Certifications'))
+      resume.certifications.forEach((c) => {
+        children.push(new Paragraph({
+          spacing: { after: 60 },
+          children: [new TextRun({ text: `• ${c}`, size: 19, font: 'Calibri', color: BLACK })]
+        }))
+      })
+    }
+
+    // Tools
+    if (resume.tools?.length) {
+      children.push(sectionPara('Tools Proficiency'))
+      children.push(new Paragraph({
+        spacing: { after: 120 },
+        children: [new TextRun({ text: resume.tools.join('  ·  '), size: 19, font: 'Calibri', color: BLACK })]
+      }))
+    }
+
+    // Education
+    if (resume.education?.length) {
+      children.push(sectionPara('Education'))
+      resume.education.forEach((e) => {
+        children.push(new Paragraph({
+          spacing: { before: 80, after: 40 },
+          children: [new TextRun({ text: e.degree, bold: true, size: 20, font: 'Calibri', color: BLACK })]
+        }))
+        children.push(new Paragraph({
+          spacing: { after: 80 },
+          children: [new TextRun({ text: `${e.institution}${e.year ? ` (${e.year})` : ''}`, size: 18, font: 'Calibri', color: GRAY })]
+        }))
+      })
+    }
+
+    const doc = new Document({
+      sections: [{ properties: {}, children: children as Paragraph[] }]
+    })
+    const blob = await Packer.toBlob(doc)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = 'tailored-resume.txt'
+    const fname = resume.contact?.name ? resume.contact.name.replace(/\s+/g, '_') : 'Resume'
+    a.download = `${fname}_Tailored.docx`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -370,25 +593,31 @@ export default function ResumeBuilderPage() {
               <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <CheckCircle size={20} className="text-green-500" /> Your Tailored Resume
               </h2>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={handleCopy}
                   className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
                 >
                   {copied ? <CheckCircle size={15} className="text-green-500" /> : <Copy size={15} />}
-                  {copied ? 'Copied!' : 'Copy Text'}
+                  {copied ? 'Copied!' : 'Copy'}
                 </button>
                 <button
-                  onClick={handleDownload}
-                  className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                  onClick={handleDownloadPDF}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
                 >
-                  <Download size={15} /> Download .txt
+                  <Download size={15} /> Download PDF
+                </button>
+                <button
+                  onClick={handleDownloadDOCX}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                >
+                  <FileText size={15} /> Download DOCX
                 </button>
                 <button
                   onClick={handlePrint}
-                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                  className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
                 >
-                  <Printer size={15} /> Print / PDF
+                  <Printer size={15} /> Print
                 </button>
               </div>
             </div>
