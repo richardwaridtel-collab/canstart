@@ -86,9 +86,12 @@ async function fetchAdzunaJobs(what: string, appId: string, appKey: string, page
 }
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const secret = process.env.CRON_SECRET
+  if (secret) {
+    const authHeader = request.headers.get('authorization')
+    if (authHeader !== `Bearer ${secret}`) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
   }
 
   const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID
