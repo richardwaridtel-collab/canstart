@@ -114,6 +114,27 @@ const DOMAIN_SIGNALS: Record<string, string[]> = {
   ],
 }
 
+// Maps the explicit job category field to a domain string.
+// Using the category field is far more reliable than trying to infer domain from description text.
+const CATEGORY_TO_DOMAIN: Record<string, string> = {
+  'marketing & communications': 'marketing',
+  'technology & it': 'tech',
+  'finance & accounting': 'finance',
+  'human resources': 'hr',
+  'sales & business development': 'sales',
+  'data & analytics': 'data',
+  'design & creative': 'design',
+  'operations & logistics': 'operations',
+  'project management': 'pm',
+  'customer service': 'customer',
+  'administration & office': 'admin',
+  'business analysis': 'data',
+  'education & training': 'education',
+  'healthcare & social services': 'healthcare',
+  'engineering': 'engineering',
+  'legal & compliance': 'legal',
+}
+
 function detectDomain(text: string): string {
   const lower = text.toLowerCase()
   const scores: Record<string, number> = {}
@@ -121,69 +142,69 @@ function detectDomain(text: string): string {
     scores[domain] = signals.filter((s) => lower.includes(s)).length
   })
   const top = Object.entries(scores).sort((a, b) => b[1] - a[1])
-  return top[0][1] > 0 ? top[0][0] : 'general'
+  return top[0][1] >= 2 ? top[0][0] : 'unknown' // require at least 2 signals, not just 1
 }
 
-function computeDomainScore(candidateText: string, jobText: string): number {
-  const jobDomain = detectDomain(jobText)
+function computeIndustryScore(candidateText: string, jobCategory: string): number {
+  // Use the explicit category field for the job domain — much more reliable
+  const jobDomain = CATEGORY_TO_DOMAIN[jobCategory?.toLowerCase().trim()] || 'unknown'
   const candidateDomain = detectDomain(candidateText)
-  if (jobDomain === 'general' || candidateDomain === 'general') return 12 // neutral
-  if (jobDomain === candidateDomain) return 20 // same domain
+
+  if (jobDomain === 'unknown' || candidateDomain === 'unknown') return 0 // don't give free points for unknowns
+
+  if (jobDomain === candidateDomain) return 30 // exact industry match
+
   // Adjacent domains (partial credit)
   const adjacent: Record<string, string[]> = {
-    tech: ['data'],
+    tech: ['data', 'engineering'],
     data: ['tech', 'finance'],
-    sales: ['marketing'],
-    marketing: ['sales', 'design'],
+    sales: ['marketing', 'customer'],
+    marketing: ['sales', 'design', 'customer'],
     finance: ['data', 'operations'],
-    hr: ['operations'],
-    design: ['marketing'],
-    operations: ['finance', 'hr'],
+    hr: ['operations', 'admin'],
+    design: ['marketing', 'tech'],
+    operations: ['finance', 'hr', 'admin'],
+    pm: ['tech', 'operations', 'data'],
+    customer: ['sales', 'marketing'],
+    admin: ['hr', 'operations'],
+    engineering: ['tech', 'operations'],
   }
-  if (adjacent[jobDomain]?.includes(candidateDomain)) return 8
-  return 0 // completely different domain — hard penalty
-}
+  if (adjacent[jobDomain]?.includes(candidateDomain)) return 12
 
-function detectSeekerLevel(resumeText: string): string {
-  if (!resumeText || resumeText.length < 50) return 'Mid Level'
-  const yearsMatches = [...resumeText.matchAll(/(\d{1,2})\s*\+?\s*years?/gi)]
-  if (yearsMatches.length > 0) {
-    const max = Math.max(...yearsMatches.map((m) => parseInt(m[1])))
-    if (max <= 2) return 'Entry Level'
-    if (max >= 8) return 'Senior Level'
-    return 'Mid Level'
-  }
-  return 'Mid Level'
+  return 0 // completely different industry — no points
 }
 
 /**
- * 3-factor match score — purely based on candidate experience vs job requirements.
- * Location and work mode are NOT considered (candidate can relocate / be flexible).
+ * 2-factor match score — purely skills & industry relevance.
+ * No location, no work mode, no experience level defaults.
+ * No free points — everything must be earned from actual content.
  *
- * Factor 1 — Domain-specific keyword coverage  (60 pts): required skills weighted 2×
- * Factor 2 — Domain / industry alignment       (25 pts): heavy cross-domain penalty
- * Factor 3 — Experience level alignment        (15 pts): years / seniority fit
- * Total: 100 pts
+ * Factor 1 — Domain-specific skill/keyword coverage  (70 pts)
+ *   — soft skills excluded, required skills weighted 2×
+ *   — scores 0 if no relevant keywords found in job
+ * Factor 2 — Industry alignment from job category    (30 pts)
+ *   — uses explicit category field, not guessed from text
+ *   — scores 0 for unknown or cross-industry
  */
 function computeJobMatch(
   seeker: SeekerProfile | null,
   jobTitle: string,
   jobDescription: string,
   requiredSkills: string[] = [],
-  workMode: string,
-  jobCity: string,
+  _workMode: string,
+  _jobCity: string,
+  jobCategory: string = '',
 ): number {
   if (!seeker) return 0
-  void workMode; void jobCity // not used — location/mode excluded from scoring
 
   const resumeText = seeker.resume_text?.toLowerCase() || ''
   const hasResume = resumeText.length > 50
   const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
-  const jobText = (jobTitle + ' ' + jobDescription).toLowerCase()
 
-  // ── Factor 1: Domain-specific keyword coverage (60 pts) ──────────────────────
+  // ── Factor 1: Domain-specific keyword coverage (70 pts) ──────────────────────
   const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
     .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
+
   let weightedMatched = 0
   let weightedTotal = 0
   keywords.forEach(({ keyword, required }) => {
@@ -192,32 +213,28 @@ function computeJobMatch(
     if (candidateText.includes(keyword.toLowerCase())) weightedMatched += weight
   })
   requiredSkills.filter(Boolean).forEach((s) => {
-    if (!keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase()) && !SOFT_SKILLS_EXCLUDED.has(s.toLowerCase())) {
+    if (!SOFT_SKILLS_EXCLUDED.has(s.toLowerCase()) &&
+        !keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase())) {
       weightedTotal += 2
       if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
     }
   })
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 60) : 20
+  // No default — if zero keywords are found in the job, score is 0
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 70) : 0
 
-  // ── Factor 2: Domain / industry alignment (25 pts) ───────────────────────────
-  const domainScore = Math.round(computeDomainScore(candidateText, jobText) * (25 / 20))
+  // ── Factor 2: Industry alignment (30 pts) ────────────────────────────────────
+  const industryScore = computeIndustryScore(candidateText, jobCategory)
 
-  // ── Factor 3: Experience level alignment (15 pts) ────────────────────────────
-  const jobLevel = detectExperienceFromTitle(jobTitle)
-  const seekerLevel = detectSeekerLevel(hasResume ? resumeText : '')
-  const levels = ['Entry Level', 'Mid Level', 'Senior Level']
-  const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
-  const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
-
-  return Math.round(Math.min(100, keywordScore + domainScore + levelScore))
+  return Math.round(Math.min(100, keywordScore + industryScore))
 }
 
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
-  return computeJobMatch(seeker, opp.title, opp.description || '', opp.skills_required || [], opp.work_mode, opp.city)
+  const cat = (opp as unknown as { category?: string }).category || ''
+  return computeJobMatch(seeker, opp.title, opp.description || '', opp.skills_required || [], opp.work_mode, opp.city, cat)
 }
 
 function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
-  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city)
+  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city, job.category)
 }
 
 // ─── ATS Keyword Analysis ────────────────────────────────────────────────────
@@ -358,8 +375,8 @@ function extractJobKeywords(title: string, description: string, requiredSkills: 
     .slice(0, 28)
 }
 
-function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity }: {
-  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string
+function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory }: {
+  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string; jobCategory: string
 }) {
   const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
   if (!keywords.length) return null
@@ -392,19 +409,14 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
   const atsPct = Math.round((matched.length / keywords.length) * 100)
 
   // Unified overall score
-  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity)
+  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory)
 
   // Score breakdown (mirrors computeJobMatch logic, for display)
   const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
   const weightedMatched = domainKeywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase())).reduce((s, { required }) => s + (required ? 2 : 1), 0)
   const weightedTotal = domainKeywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 60) : 20
-  const domainScore = Math.round(computeDomainScore(lower, (jobTitle + ' ' + jobDescription).toLowerCase()) * (25 / 20))
-  const jobLevel = detectExperienceFromTitle(jobTitle)
-  const seekerLevel = detectSeekerLevel(resumeText)
-  const levels = ['Entry Level', 'Mid Level', 'Senior Level']
-  const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
-  const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 70) : 0
+  const industryScore = computeIndustryScore(lower, jobCategory)
 
   // Application strategy
   const strategy = overallPct >= 75
@@ -438,11 +450,10 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
         </div>
 
         {/* Score breakdown */}
-        <div className="grid grid-cols-3 gap-1.5 mb-2">
+        <div className="grid grid-cols-2 gap-1.5 mb-2">
           {[
-            { label: 'Skills Match', score: keywordScore, max: 60 },
-            { label: 'Industry Fit', score: domainScore, max: 25 },
-            { label: 'Experience', score: levelScore, max: 15 },
+            { label: 'Skills & Keywords', score: keywordScore, max: 70 },
+            { label: 'Industry Fit', score: industryScore, max: 30 },
           ].map(({ label, score, max }) => (
             <div key={label} className="bg-gray-50 rounded-lg px-2 py-1.5">
               <div className="flex justify-between items-center">
@@ -819,7 +830,7 @@ function OpportunitiesInner() {
                     {seekerProfile && (
                       <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
                         <MatchBar pct={pct} fromResume={fromResume} />
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} workMode={opp.work_mode} jobCity={opp.city} />
+                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} workMode={opp.work_mode} jobCity={opp.city} jobCategory={(opp as unknown as { category?: string }).category || ''} />
                       </div>
                     )}
                   </div>
@@ -914,7 +925,7 @@ function OpportunitiesInner() {
 
                       {seekerProfile && <MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} />}
                       {seekerProfile && (
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={job.title} jobDescription={job.description || ''} workMode={job.work_mode} jobCity={job.city} />
+                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={job.title} jobDescription={job.description || ''} workMode={job.work_mode} jobCity={job.city} jobCategory={job.category} />
                       )}
                     </div>
                   )
