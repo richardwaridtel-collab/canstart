@@ -393,11 +393,6 @@ function OpportunitiesInner() {
   const [experience, setExperience] = useState('Any Level')
   const [activeTab, setActiveTab] = useState<'canstart' | 'external'>('external')
   const [loading, setLoading] = useState(false)
-  // Read ?city= from URL (e.g. from home page city links)
-  useEffect(() => {
-    const urlCity = searchParams.get('city')
-    if (urlCity && CITIES.includes(urlCity)) setCity(urlCity)
-  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set())
@@ -407,7 +402,13 @@ function OpportunitiesInner() {
   useEffect(() => {
     checkAuth()
     loadExternalJobs()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Read ?city= query param from home page city links
+  useEffect(() => {
+    const urlCity = searchParams.get('city')
+    if (urlCity && CITIES.includes(urlCity)) setCity(urlCity)
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cs = [...canstartJobs]
