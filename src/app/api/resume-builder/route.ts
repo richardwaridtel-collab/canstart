@@ -5,40 +5,72 @@ const BANNED_WORDS = [
   'spearheaded','spearhead','orchestrated','orchestrate','championed','champion',
   'transformed','transform','revolutionized','revolutionize','synergized','synergize',
   'optimized','optimize','streamlined','streamline','facilitated','facilitate',
-  'ideated','ideate','pivoted','pivot','disrupted','disrupt','scaled','mobilized',
-  'mobilize','executed','execute','deployed','deploy','fostered','foster',
-  'cultivated','cultivate','empowered','empower','showcased','showcase',
+  'ideated','ideate','pivoted','pivot','disrupted','disrupt','mobilized','mobilize',
+  'fostered','foster','cultivated','cultivate','empowered','empower','showcased','showcase',
   'harnessed','harness','capitalized','capitalize','demonstrated','demonstrate',
   'spearheading','orchestrating','championing','transforming','facilitating',
+  'delivered value','drove results','ensured','enabled','impactful','passionate',
+  'dynamic','innovative','synergy','best-in-class','thought leader','visionary',
 ]
 
-const RESUME_PROMPT = `You are a professional resume writer helping newcomers to Canada.
-Create a tailored resume based on the candidate's existing resume and the job description provided.
+const RESUME_PROMPT = `You are a professional resume writer. Your job is to rewrite a candidate's resume
+tailored to a specific job description, following a very specific writing style.
 
-=== STRICT RULES — FOLLOW EXACTLY ===
+=== THE WRITING STYLE TO FOLLOW (CRITICAL) ===
 
-RULE 1 — BANNED WORDS: Never use any of these words in any bullet or sentence:
+Study these real bullet examples and copy this exact style:
+
+EXAMPLE BULLETS:
+- "Steered Roche's platform decommissioning across NAM and EMEA, tracking a 246-case migration roadmap to a hard December deadline."
+- "Tracked and closed 147 RAID items across five delivery waves (60 risks, 87 dependencies), with nothing left unmitigated."
+- "Delivered 98% user migration on time by directing a 10-person partner team of Scrum Masters, BAs, and an Assessment Lead."
+- "Negotiated and maintained vendor and client relationships across platform delivery projects, cutting reporting effort by 40%."
+- "Set up sprint-based governance across three concurrent client projects, keeping 95% on time with full requirements traceability at handoff."
+- "Scoped and documented SaaS migration requirements end to end, cutting implementation costs by $60K with BRDs that left no gaps."
+- "Managed a $3M+ portfolio across SMB, enterprise, and consumer segments, finishing 10% under budget with 95% on-time delivery."
+- "Rolled out full Avaya CCaaS across 5 contact center locations for 800+ agents, on time and within a $1.2M budget."
+- "Rebuilt and relaunched the loyalty program, bringing in 600,000 members and lifting CSAT from 70 to 90 within 12 months."
+- "Ran ABM campaign workstreams that brought in 50+ enterprise clients within three quarters of launch."
+- "Supervised teams of 15–40 agents across contact center operations, holding 99.8% SLA attainment across all service lines."
+
+WHAT THESE EXAMPLES HAVE IN COMMON (follow all of these):
+1. Start directly with a strong action verb — no preamble, no "In a fast-paced environment", no setup phrase
+2. Every bullet makes ONE clear claim: what was done + what resulted from it
+3. Use specific numbers, percentages, dollar amounts, or counts wherever possible (e.g. 147 items, $60K, 98%, 20,037 users)
+4. Three patterns used — mix them across each role:
+   PATTERN A: [Action verb] + [what you did/scope] + [result with number]
+   Example: "Set up sprint-based governance across three projects, keeping 95% on time at handoff."
+   PATTERN B: [Result with number] + "by" + [how you did it]
+   Example: "Delivered 98% user migration on time by directing a 10-person partner team."
+   PATTERN C: [Action verb] + [what] + [impact/consequence clause]
+   Example: "Tracked 147 RAID items across five waves, with nothing left unmitigated."
+5. Bullets are 15–22 words. Say what needs to be said and stop. Never pad for length.
+6. Language is plain and direct — a real person describing real work, not marketing copy
+7. NO buzzwords, NO vague claims, NO AI-sounding phrases
+
+=== BANNED WORDS — NEVER USE THESE ===
 ${BANNED_WORDS.join(', ')}
 
-Instead use simple human verbs like: managed, built, created, led, wrote, helped, worked,
-made, set up, ran, found, fixed, trained, reviewed, coordinated, planned, handled, improved,
-reduced, increased, supported, assisted, prepared, worked with, talked to, responded to,
-checked, updated, reported, tested, tracked, answered, organized, scheduled
+=== APPROVED ACTION VERBS (use these) ===
+Managed, Built, Created, Led, Ran, Set up, Wrote, Tracked, Directed, Coordinated,
+Negotiated, Scoped, Launched, Rolled out, Rebuilt, Supervised, Expanded, Raised,
+Integrated, Automated, Produced, Moved, Owned, Reversed, Delivered, Planned,
+Handled, Reduced, Increased, Cut, Grew, Hired, Trained, Reviewed, Reported,
+Presented, Closed, Signed, Brought in, Worked with, Supported, Tested, Fixed
 
-RULE 2 — BULLET METHOD: Every bullet must follow EITHER CAR or STAR format. Mix both within each role.
-- CAR (Context → Action → Result): "In a [context], [action verb] [what you did], which [result with number if possible]."
-- STAR (Situation → Task → Action → Result): "When [situation], [task required], [what you did] and [result]."
-Both types must read naturally, like a real person wrote them, not an AI.
-
-RULE 3 — WORD COUNT: Count every word. Each bullet must be between 18 and 20 words. No exceptions.
-
-RULE 4 — BULLET COUNT PER ROLE (based on how many roles exist):
-- Role 1 (most recent / current): exactly 6 bullets
+=== BULLET COUNT PER ROLE ===
+- Role 1 (most recent/current): exactly 6 bullets
 - Role 2 and Role 3: exactly 4 bullets each
 - Role 4 and all roles after: exactly 3 bullets each
 
-RULE 5 — SIMPLE TONE: Write the way a real professional would talk about their work.
-Avoid buzzwords, corporate speak, and anything that sounds AI-generated.
+=== PROFESSIONAL SUMMARY STYLE ===
+Write 3–4 sentences in first person, conversational and honest.
+Model it after this example: "I've spent 17 years getting complex programs across the line,
+most recently running a platform migration for F. Hoffmann-La Roche across NAM and EMEA,
+managing a ~13M CHF budget and 20,000+ users through a hard decommissioning deadline.
+I work best in environments where the stakes are real, the org chart is complicated,
+and someone needs to hold the whole thing together."
+Tailor the summary to the specific job description provided. Use the candidate's actual background.
 
 === OUTPUT FORMAT ===
 Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
