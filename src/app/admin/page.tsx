@@ -80,6 +80,29 @@ export default function AdminPage() {
   }
 
   const loadJobBoard = async () => {
+    // Accurate total count directly from DB (no row limit)
+    const { count: exactTotal } = await supabase
+      .from('external_opportunities')
+      .select('*', { count: 'exact', head: true })
+    setJbTotal(exactTotal || 0)
+
+    // Today's count
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+    const { count: todayCount } = await supabase
+      .from('external_opportunities')
+      .select('*', { count: 'exact', head: true })
+      .gte('synced_at', todayStart.toISOString())
+    setJbToday(todayCount || 0)
+
+    // Last sync timestamp
+    const { data: lastRow } = await supabase
+      .from('external_opportunities')
+      .select('synced_at')
+      .order('synced_at', { ascending: false })
+      .limit(1)
+    setJbLastSync(lastRow?.[0]?.synced_at ?? null)
+
+    // Load lightweight rows for breakdowns
     const { data } = await supabase
       .from('external_opportunities')
       .select('category, city, synced_at')
@@ -87,13 +110,6 @@ export default function AdminPage() {
       .limit(5000)
 
     if (!data || data.length === 0) return
-
-    const todayStr = new Date().toISOString().slice(0, 10)
-
-    // Total & today
-    setJbTotal(data.length)
-    setJbToday(data.filter((r: { synced_at: string }) => r.synced_at?.slice(0, 10) === todayStr).length)
-    setJbLastSync(data[0]?.synced_at ?? null)
 
     // By category
     const catMap: Record<string, number> = {}
