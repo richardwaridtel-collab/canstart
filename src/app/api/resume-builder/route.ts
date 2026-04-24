@@ -114,7 +114,8 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
     "resumeRating": 8,
     "matchPercentage": 74,
     "ratingReasons": ["reason1", "reason2", "reason3"],
-    "matchGaps": ["gap1", "gap2"]
+    "matchGaps": ["gap1", "gap2"],
+    "trainingRecommendations": ["recommendation1", "recommendation2"]
   }
 }
 
@@ -198,7 +199,10 @@ MATCH BENCHMARKS:
   Most matches should honestly fall between 45% and 70%. Only give 80%+ if the fit is genuinely strong.
 
 - ratingReasons: 2–3 short specific sentences saying exactly what the resume does well (refer to actual bullets or sections).
-- matchGaps: list 1–3 specific skills, tools, or experiences from the job description that are missing or underrepresented in the resume. Be specific (e.g. "No mention of Salesforce CRM which is listed as required"). If match is genuinely above 85%, set to [].`
+
+- matchGaps: Explain specifically why this resume is NOT scoring above 90% match. List 2–4 concrete experience gaps — things the job description requires that the candidate's background does not clearly demonstrate. Be direct and specific (e.g. "No direct PR or media relations experience, which is a core requirement of this role" or "Has not managed paid social ad budgets, which the JD lists as required"). These should be real gaps based on comparing the resume to the JD — not generic observations. If the match is genuinely above 90%, set to [].
+
+- trainingRecommendations: For each gap listed in matchGaps, suggest one specific, actionable training or certification the candidate could pursue to close that gap and push their match above 90%. Name real courses, platforms, or credentials (e.g. "Google Digital Marketing & E-commerce Certificate on Coursera", "HubSpot Content Marketing Certification (free)", "Meta Blueprint: Certified Digital Marketing Associate", "PMI CAPM certification for project management fundamentals"). Be specific — not generic advice like "take a marketing course". If matchGaps is empty, set trainingRecommendations to [].`
 
 export async function POST(request: Request) {
   try {

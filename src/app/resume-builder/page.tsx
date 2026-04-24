@@ -36,6 +36,7 @@ type ResumeScores = {
   matchPercentage: number
   ratingReasons: string[]
   matchGaps: string[]
+  trainingRecommendations: string[]
 }
 
 type GeneratedResume = {
@@ -671,15 +672,35 @@ export default function ResumeBuilderPage() {
                       style={{ width: `${resume.scores.matchPercentage}%` }}
                     />
                   </div>
+
                   {resume.scores.matchGaps && resume.scores.matchGaps.length > 0 ? (
                     <>
-                      <p className="text-xs font-semibold text-gray-400 mb-1.5">Gaps to address:</p>
-                      {resume.scores.matchGaps.map((g, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs text-gray-600 mb-1.5">
-                          <AlertCircle size={12} className="text-yellow-500 flex-shrink-0 mt-0.5" />
-                          <span>{g}</span>
-                        </div>
-                      ))}
+                      <p className="text-xs font-semibold text-gray-500 mb-2">Why this isn&apos;t a 90%+ match:</p>
+                      <div className="space-y-1.5 mb-4">
+                        {resume.scores.matchGaps.map((g, i) => (
+                          <div key={i} className="flex items-start gap-2 text-xs text-gray-600">
+                            <AlertCircle size={12} className="text-orange-400 flex-shrink-0 mt-0.5" />
+                            <span>{g}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {resume.scores.trainingRecommendations && resume.scores.trainingRecommendations.length > 0 && (
+                        <>
+                          <div className="border-t border-gray-100 pt-3 mt-3">
+                            <p className="text-xs font-semibold text-blue-600 mb-2">📚 Close the gap — recommended training:</p>
+                            <div className="space-y-1.5">
+                              {resume.scores.trainingRecommendations.map((t, i) => (
+                                <div key={i} className="flex items-start gap-2 text-xs text-gray-600">
+                                  <CheckCircle size={12} className="text-blue-400 flex-shrink-0 mt-0.5" />
+                                  <span>{t}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <p className="text-xs text-gray-400 mt-2 italic">Completing these would push your match score above 90%.</p>
+                          </div>
+                        </>
+                      )}
                     </>
                   ) : (
                     <div className="flex items-center gap-2 text-xs text-green-600">
