@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
 
@@ -622,6 +622,7 @@ function OpportunitiesInner() {
   const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set())
   const [markingApplied, setMarkingApplied] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
+  const [selectedJob, setSelectedJob] = useState<ExternalJob | null>(null)
 
   useEffect(() => {
     checkAuth()
@@ -760,6 +761,7 @@ function OpportunitiesInner() {
   }
 
   return (
+    <>
     <div className="min-h-screen bg-gray-50">
       <div className="bg-gradient-to-br from-red-700 to-red-600 text-white py-14">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -920,15 +922,12 @@ function OpportunitiesInner() {
 
                       {/* Action buttons */}
                       <div className="flex gap-2 mt-auto pt-3 border-t border-gray-100">
-                        <a
-                          href={job.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => track('external_job_click', { category: job.category, city: job.city })}
-                          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors"
+                        <button
+                          onClick={() => { setSelectedJob(job); track('external_job_view', { category: job.category, city: job.city }) }}
+                          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors"
                         >
-                          <ExternalLink size={12} /> View Job
-                        </a>
+                          <Briefcase size={12} /> View Details
+                        </button>
                         {isLoggedIn && seekerProfile ? (
                           isApplied ? (
                             <div className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-green-100 text-green-700 px-3 py-2 rounded-lg cursor-default">
@@ -959,5 +958,88 @@ function OpportunitiesInner() {
         )}
       </div>
     </div>
+
+    {/* ── Job Detail Modal ── */}
+
+    {selectedJob && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+        onClick={(e) => { if (e.target === e.currentTarget) setSelectedJob(null) }}
+      >
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4 p-6 border-b border-gray-100">
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                <span className="text-xs font-medium px-2 py-1 rounded-full bg-blue-100 text-blue-700">{selectedJob.category}</span>
+                <span className="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-600 capitalize">{selectedJob.work_mode}</span>
+                {appliedJobIds.has(selectedJob.id) && (
+                  <span className="text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700 flex items-center gap-1"><CheckCircle size={10} /> Applied</span>
+                )}
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 leading-snug">{selectedJob.title}</h2>
+              <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500">
+                <span className="flex items-center gap-1"><Building2 size={14} />{selectedJob.company}</span>
+                <span className="flex items-center gap-1"><MapPin size={14} />{selectedJob.city}</span>
+                {formatSalary(selectedJob.salary_min, selectedJob.salary_max) && (
+                  <span className="text-green-600 font-medium">{formatSalary(selectedJob.salary_min, selectedJob.salary_max)}</span>
+                )}
+                {selectedJob.synced_at && (
+                  <span className="flex items-center gap-1"><Calendar size={14} />Posted {new Date(selectedJob.synced_at).toLocaleDateString('en-CA')}</span>
+                )}
+              </div>
+            </div>
+            <button onClick={() => setSelectedJob(null)} className="text-gray-400 hover:text-gray-600 flex-shrink-0 p-1 rounded-lg hover:bg-gray-100 transition-colors">
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Body — full description */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {seekerProfile && (
+              <div className="mb-5">
+                <ATSPanel
+                  resumeText={seekerProfile.resume_text || ''}
+                  seekerProfile={seekerProfile}
+                  jobTitle={selectedJob.title}
+                  jobDescription={selectedJob.description || ''}
+                  workMode={selectedJob.work_mode}
+                  jobCity={selectedJob.city}
+                  jobCategory={selectedJob.category}
+                />
+              </div>
+            )}
+            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Job Description</h3>
+            <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+              {selectedJob.description || 'No description available.'}
+            </div>
+          </div>
+
+          {/* Footer — actions */}
+          <div className="flex gap-3 p-6 border-t border-gray-100">
+            {isLoggedIn && seekerProfile && !appliedJobIds.has(selectedJob.id) && (
+              <button
+                onClick={() => markApplied(selectedJob)}
+                disabled={markingApplied === selectedJob.id}
+                className="flex items-center justify-center gap-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-60"
+              >
+                {markingApplied === selectedJob.id ? <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" /> : <CheckCircle size={15} />}
+                Mark as Applied
+              </button>
+            )}
+            <a
+              href={selectedJob.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => track('external_job_click', { category: selectedJob.category, city: selectedJob.city })}
+              className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-colors"
+            >
+              Apply Now <ExternalLink size={14} />
+            </a>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

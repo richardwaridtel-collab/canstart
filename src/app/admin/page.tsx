@@ -6,12 +6,12 @@ import { supabase } from '@/lib/supabase'
 import {
   Users, Briefcase, Search, RefreshCw, CheckCircle, TrendingUp,
   ExternalLink, FileText, MapPin, Globe, Star, BarChart2, Clock,
-  UserCheck, Building2, AlertCircle,
+  UserCheck, Building2, AlertCircle, Database, Layers,
 } from 'lucide-react'
 
 const ADMIN_EMAILS = ['richard.waridtel@gmail.com']
 
-type TabId = 'overview' | 'seekers' | 'employers' | 'jobs' | 'applications' | 'external'
+type TabId = 'overview' | 'seekers' | 'employers' | 'jobs' | 'applications' | 'external' | 'jobboard'
 
 type SeekRow = { user_id: string; full_name: string; city: string; created_at: string; immigration_status?: string; has_resume?: boolean }
 type EmpRow = { user_id: string; full_name: string; city: string; created_at: string; company_name?: string }
@@ -35,6 +35,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'jobs', label: 'Jobs' },
   { id: 'applications', label: 'Applications' },
   { id: 'external', label: 'External Applied' },
+  { id: 'jobboard', label: 'Job Board' },
 ]
 
 export default function AdminPage() {
@@ -52,6 +53,12 @@ export default function AdminPage() {
   const [extApps, setExtApps] = useState<ExtAppRow[]>([])
   const [cityBreakdown, setCityBreakdown] = useState<{ city: string; count: number }[]>([])
   const [statusBreakdown, setStatusBreakdown] = useState<{ status: string; count: number }[]>([])
+  const [jbTotal, setJbTotal] = useState(0)
+  const [jbToday, setJbToday] = useState(0)
+  const [jbLastSync, setJbLastSync] = useState<string | null>(null)
+  const [jbByCategory, setJbByCategory] = useState<{ category: string; count: number }[]>([])
+  const [jbByCity, setJbByCity] = useState<{ city: string; count: number }[]>([])
+  const [jbDailyHistory, setJbDailyHistory] = useState<{ date: string; count: number }[]>([])
 
   useEffect(() => { checkAdmin() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -68,8 +75,48 @@ export default function AdminPage() {
 
   const loadAll = async () => {
     setRefreshing(true)
-    await Promise.all([loadSeekers(), loadEmployers(), loadJobs(), loadApps(), loadExtApps()])
+    await Promise.all([loadSeekers(), loadEmployers(), loadJobs(), loadApps(), loadExtApps(), loadJobBoard()])
     setRefreshing(false)
+  }
+
+  const loadJobBoard = async () => {
+    const { data } = await supabase
+      .from('external_opportunities')
+      .select('category, city, synced_at')
+      .order('synced_at', { ascending: false })
+      .limit(5000)
+
+    if (!data || data.length === 0) return
+
+    const todayStr = new Date().toISOString().slice(0, 10)
+
+    // Total & today
+    setJbTotal(data.length)
+    setJbToday(data.filter((r: { synced_at: string }) => r.synced_at?.slice(0, 10) === todayStr).length)
+    setJbLastSync(data[0]?.synced_at ?? null)
+
+    // By category
+    const catMap: Record<string, number> = {}
+    data.forEach((r: { category: string }) => {
+      if (r.category) catMap[r.category] = (catMap[r.category] || 0) + 1
+    })
+    setJbByCategory(Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([category, count]) => ({ category, count })))
+
+    // By city
+    const cityMap: Record<string, number> = {}
+    data.forEach((r: { city: string }) => {
+      if (r.city) cityMap[r.city] = (cityMap[r.city] || 0) + 1
+    })
+    setJbByCity(Object.entries(cityMap).sort((a, b) => b[1] - a[1]).map(([city, count]) => ({ city, count })))
+
+    // Daily history — last 14 days
+    const dayMap: Record<string, number> = {}
+    data.forEach((r: { synced_at: string }) => {
+      const d = r.synced_at?.slice(0, 10)
+      if (d) dayMap[d] = (dayMap[d] || 0) + 1
+    })
+    const sorted = Object.entries(dayMap).sort((a, b) => a[0].localeCompare(b[0])).slice(-14)
+    setJbDailyHistory(sorted.map(([date, count]) => ({ date, count })))
   }
 
   const loadSeekers = async () => {
@@ -165,7 +212,7 @@ export default function AdminPage() {
   const fApps      = apps.filter((a)      => !q || (a.seeker_name || '').toLowerCase().includes(q) || (a.job_title || '').toLowerCase().includes(q))
   const fExtApps   = extApps.filter((a)   => !q || (a.seeker_name || '').toLowerCase().includes(q) || a.company?.toLowerCase().includes(q) || a.job_title?.toLowerCase().includes(q))
 
-  const tabCounts: Record<TabId, number> = { overview: 0, seekers: seekers.length, employers: employers.length, jobs: jobs.length, applications: apps.length, external: extApps.length }
+  const tabCounts: Record<TabId, number> = { overview: 0, seekers: seekers.length, employers: employers.length, jobs: jobs.length, applications: apps.length, external: extApps.length, jobboard: jbTotal }
 
   if (loading) return (
     <div className="max-w-6xl mx-auto px-4 py-10 animate-pulse space-y-4">
@@ -408,6 +455,111 @@ export default function AdminPage() {
               </tbody>
             </table>
             {fApps.length === 0 && <div className="text-center py-10 text-gray-400 text-sm">No applications found.</div>}
+          </div>
+        )}
+
+        {/* ── JOB BOARD ── */}
+        {activeTab === 'jobboard' && (
+          <div className="space-y-6">
+
+            {/* Summary cards */}
+            <div>
+              <p className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">External Job Board — Adzuna Sync</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { value: jbTotal, label: 'Total Jobs in DB', sub: 'across all categories', icon: <Database size={22} />, color: 'text-gray-900' },
+                  { value: jbToday, label: 'Added Today', sub: new Date().toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }), icon: <TrendingUp size={22} />, color: 'text-green-600' },
+                  { value: jbByCategory.length, label: 'Categories', sub: 'job types tracked', icon: <Layers size={22} />, color: 'text-blue-600' },
+                  { value: jbByCity.length, label: 'Cities', sub: 'locations represented', icon: <MapPin size={22} />, color: 'text-red-500' },
+                ].map((c) => (
+                  <div key={c.label} className="bg-white rounded-xl border border-gray-200 p-4">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className={`text-2xl font-bold ${c.color}`}>{c.value}</div>
+                        <div className="text-sm text-gray-500 mt-0.5">{c.label}</div>
+                        <div className="text-xs text-gray-400 mt-1">{c.sub}</div>
+                      </div>
+                      <div className="text-gray-200">{c.icon}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Last sync + schedule notice */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Clock size={14} className="text-gray-400" />
+                <span><span className="font-medium">Last sync:</span> {jbLastSync ? new Date(jbLastSync).toLocaleString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-500">
+                <CheckCircle size={14} className="text-green-500" />
+                <span>Auto-sync scheduled daily at <span className="font-medium text-gray-700">5:00 AM EDT</span> (9 AM UTC)</span>
+              </div>
+            </div>
+
+            {/* Daily history */}
+            {jbDailyHistory.length > 0 && (
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><BarChart2 size={15} className="text-purple-500" /> Jobs Added per Day (last 14 days)</h3>
+                {(() => {
+                  const maxCount = Math.max(...jbDailyHistory.map(d => d.count), 1)
+                  return jbDailyHistory.map(({ date, count }) => {
+                    const pct = Math.round((count / maxCount) * 100)
+                    const label = new Date(date + 'T12:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+                    return (
+                      <div key={date} className="mb-2">
+                        <div className="flex justify-between text-sm mb-1">
+                          <span className="text-gray-600 text-xs w-16 shrink-0">{label}</span>
+                          <div className="flex-1 mx-3 flex items-center">
+                            <div className="w-full h-2 bg-gray-100 rounded-full">
+                              <div className="h-full bg-purple-400 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                          <span className="text-gray-500 text-xs w-12 text-right">{count.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            )}
+
+            {/* By category + by city */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><Layers size={15} className="text-blue-500" /> Jobs by Category</h3>
+                {jbByCategory.length === 0 ? <p className="text-sm text-gray-400">No data yet.</p> : jbByCategory.map(({ category, count }) => {
+                  const pct = jbTotal ? Math.round((count / jbTotal) * 100) : 0
+                  return (
+                    <div key={category} className="mb-2">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-700 text-xs truncate max-w-[65%]">{category}</span>
+                        <span className="text-gray-400 text-xs">{count} ({pct}%)</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full"><div className="h-full bg-blue-400 rounded-full" style={{ width: `${pct}%` }} /></div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-200 p-5">
+                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2"><MapPin size={15} className="text-red-500" /> Jobs by City</h3>
+                {jbByCity.length === 0 ? <p className="text-sm text-gray-400">No data yet.</p> : jbByCity.slice(0, 10).map(({ city, count }) => {
+                  const pct = jbTotal ? Math.round((count / jbTotal) * 100) : 0
+                  return (
+                    <div key={city} className="mb-2">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-gray-700 text-xs">{city}</span>
+                        <span className="text-gray-400 text-xs">{count} ({pct}%)</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full"><div className="h-full bg-red-400 rounded-full" style={{ width: `${pct}%` }} /></div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
           </div>
         )}
 
