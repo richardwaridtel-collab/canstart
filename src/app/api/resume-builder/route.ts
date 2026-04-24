@@ -114,7 +114,15 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
 }
 
 For contact: extract name, city, province, phone, email, and LinkedIn from the original resume. Set any missing fields to null.
-For competencies: choose exactly 9 or 12 skills matching the job description and candidate background.
+
+For competencies — BE HONEST AND GROUNDED. Follow these rules strictly:
+1. Every competency must be directly evidenced by the candidate's actual experience bullets or job history. Do not invent skills they have not demonstrated.
+2. Do not add skills just because they appear in the job description. Only include a competency if the candidate has actually done it.
+3. Do not use vague or inflated labels. "Stakeholder Management" is valid if they've done it. "Strategic Leadership" is not valid unless they led strategy at a real level. Use plain, specific labels.
+4. Do not list a tool or technology as a competency unless it appears in their actual work history.
+5. Choose exactly 9 or 12 — pick whichever count reflects the genuine breadth of their background. 9 is fine. Do not pad to 12 just to fill space.
+6. The competencies must visibly connect to what the experience bullets describe. A reader should look at the bullets and immediately see where each competency comes from.
+
 For certifications and tools: only include if present in the original resume. Otherwise set to null.
 For education: only include if mentioned in the original resume. Otherwise set to null.
 For scores — BE STRICT AND HONEST. Do not inflate. A generous score is misleading and harmful.
