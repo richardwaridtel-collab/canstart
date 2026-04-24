@@ -773,7 +773,7 @@ function OpportunitiesInner() {
   const loadExternalJobs = async () => {
     setExternalLoading(true)
     try {
-      const { data } = await supabase.from('external_opportunities').select('*').order('synced_at', { ascending: false }).limit(200)
+      const { data } = await supabase.from('external_opportunities').select('*').order('synced_at', { ascending: false }).limit(1000)
       if (data && data.length > 0) {
         setExternalJobs(data as ExternalJob[])
         setLastSynced(data[0]?.synced_at || null)
