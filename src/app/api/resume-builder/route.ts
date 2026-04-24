@@ -88,8 +88,8 @@ export async function POST(request: Request) {
     try {
       if (ext === 'pdf') {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>
-        const result = await pdfParse(buffer)
+        const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (buf: Buffer, opts?: object) => Promise<{ text: string }>
+        const result = await pdfParse(buffer, {})
         resumeText = result.text
       } else if (ext === 'docx') {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
