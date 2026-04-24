@@ -305,11 +305,10 @@ export default function ResumeBuilderPage() {
   const handleDownloadDOCX = async () => {
     if (!resume) return
     const {
-      Document, Paragraph, TextRun, Packer, AlignmentType,
-      BorderStyle, HeadingLevel, TabStopType
+      Document, Paragraph, TextRun, Packer, AlignmentType, BorderStyle
     } = await import('docx')
 
-    void HeadingLevel; void TabStopType
+    void Paragraph
 
     const RED = 'B41414'
     const GRAY = '666666'
@@ -422,7 +421,8 @@ export default function ResumeBuilderPage() {
     }
 
     const doc = new Document({
-      sections: [{ properties: {}, children: children as Paragraph[] }]
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sections: [{ properties: {}, children: children as any[] }]
     })
     const blob = await Packer.toBlob(doc)
     const url = URL.createObjectURL(blob)
