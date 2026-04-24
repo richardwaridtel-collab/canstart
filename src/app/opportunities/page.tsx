@@ -966,10 +966,13 @@ function OpportunitiesInner() {
                       {/* Action buttons */}
                       <div className="flex gap-2 mt-auto pt-3 border-t border-gray-100">
                         <button
-                          onClick={() => { setSelectedJob(job); track('external_job_view', { category: job.category, city: job.city }) }}
+                          onClick={() => {
+                            if (!isLoggedIn) { router.push('/auth/signin?redirect=/opportunities'); return }
+                            setSelectedJob(job); track('external_job_view', { category: job.category, city: job.city })
+                          }}
                           className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors"
                         >
-                          <Briefcase size={12} /> View Details
+                          <Briefcase size={12} /> {isLoggedIn ? 'View Details' : 'Sign In to View'}
                         </button>
                         {isLoggedIn && seekerProfile ? (
                           isApplied ? (
@@ -1059,54 +1062,31 @@ function OpportunitiesInner() {
           </div>
 
           {/* Footer — actions */}
-          {!isLoggedIn ? (
-            <div className="p-6 border-t border-gray-100">
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mb-3 text-center">
-                <p className="text-sm font-semibold text-gray-800 mb-1">Sign in to apply for this job</p>
-                <p className="text-xs text-gray-500">Create a free account to apply, track your applications, and get your resume match score.</p>
+          <div className="flex gap-3 p-6 border-t border-gray-100">
+            {appliedJobIds.has(selectedJob.id) ? (
+              <div className="flex items-center justify-center gap-2 text-sm font-medium bg-green-100 text-green-700 px-4 py-2.5 rounded-xl">
+                <CheckCircle size={15} /> Applied
               </div>
-              <div className="flex gap-3">
-                <Link
-                  href={`/auth/signin?redirect=/opportunities`}
-                  className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-colors"
-                >
-                  Sign In to Apply
-                </Link>
-                <Link
-                  href={`/auth/signup?redirect=/opportunities`}
-                  className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-white border border-gray-200 hover:border-blue-400 text-gray-700 px-4 py-2.5 rounded-xl transition-colors"
-                >
-                  Create Free Account
-                </Link>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-3 p-6 border-t border-gray-100">
-              {appliedJobIds.has(selectedJob.id) ? (
-                <div className="flex items-center justify-center gap-2 text-sm font-medium bg-green-100 text-green-700 px-4 py-2.5 rounded-xl">
-                  <CheckCircle size={15} /> Applied
-                </div>
-              ) : (
-                <button
-                  onClick={() => markApplied(selectedJob)}
-                  disabled={markingApplied === selectedJob.id}
-                  className="flex items-center justify-center gap-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-60"
-                >
-                  {markingApplied === selectedJob.id ? <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" /> : <CheckCircle size={15} />}
-                  Mark as Applied
-                </button>
-              )}
-              <a
-                href={selectedJob.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => { markApplied(selectedJob); track('external_job_click', { category: selectedJob.category, city: selectedJob.city }) }}
-                className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-colors"
+            ) : (
+              <button
+                onClick={() => markApplied(selectedJob)}
+                disabled={markingApplied === selectedJob.id}
+                className="flex items-center justify-center gap-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl transition-colors disabled:opacity-60"
               >
-                Apply Now <ExternalLink size={14} />
-              </a>
-            </div>
-          )}
+                {markingApplied === selectedJob.id ? <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" /> : <CheckCircle size={15} />}
+                Mark as Applied
+              </button>
+            )}
+            <a
+              href={selectedJob.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => { markApplied(selectedJob); track('external_job_click', { category: selectedJob.category, city: selectedJob.city }) }}
+              className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-colors"
+            >
+              Apply Now <ExternalLink size={14} />
+            </a>
+          </div>
         </div>
       </div>
     )}
