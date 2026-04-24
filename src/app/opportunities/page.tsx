@@ -56,63 +56,80 @@ function detectExperienceFromTitle(title: string): string {
   return 'Mid Level'
 }
 
-function skillsMatch(skills: string[], text: string): number {
-  return skills.filter((s) => text.includes(s.toLowerCase())).length
+function detectSeekerLevel(resumeText: string): string {
+  if (!resumeText || resumeText.length < 50) return 'Mid Level'
+  const yearsMatches = [...resumeText.matchAll(/(\d{1,2})\s*\+?\s*years?/gi)]
+  if (yearsMatches.length > 0) {
+    const max = Math.max(...yearsMatches.map((m) => parseInt(m[1])))
+    if (max <= 2) return 'Entry Level'
+    if (max >= 8) return 'Senior Level'
+    return 'Mid Level'
+  }
+  return 'Mid Level'
 }
 
-function tieredSkillScore(matched: number, max = 65): number {
-  if (matched >= 4) return max
-  if (matched === 3) return Math.round(max * 0.85)
-  if (matched === 2) return Math.round(max * 0.65)
-  if (matched === 1) return Math.round(max * 0.40)
-  return 0
+/**
+ * Unified 4-factor match score (replaces both computeCanstartMatch and computeExternalMatch)
+ * Factor 1 — Keyword & skills coverage   (50 pts): how many job keywords appear in resume/skills
+ * Factor 2 — Experience level alignment  (20 pts): job level vs estimated seeker level
+ * Factor 3 — Work mode fit              (15 pts): remote/hybrid/onsite preference
+ * Factor 4 — Location fit               (15 pts): city match
+ */
+function computeJobMatch(
+  seeker: SeekerProfile | null,
+  jobTitle: string,
+  jobDescription: string,
+  requiredSkills: string[] = [],
+  workMode: string,
+  jobCity: string,
+): number {
+  if (!seeker) return 0
+
+  const resumeText = seeker.resume_text?.toLowerCase() || ''
+  const hasResume = resumeText.length > 50
+  const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
+
+  // ── Factor 1: Keyword coverage (50 pts) ─────────────────────────────────────
+  const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+  let weightedMatched = 0
+  let weightedTotal = 0
+  keywords.forEach(({ keyword, required }) => {
+    const weight = required ? 2 : 1
+    weightedTotal += weight
+    if (candidateText.includes(keyword.toLowerCase())) weightedMatched += weight
+  })
+  // Also check explicit required skills directly
+  const explicitRequired = requiredSkills.filter(Boolean)
+  explicitRequired.forEach((s) => {
+    if (!keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase())) {
+      weightedTotal += 2
+      if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
+    }
+  })
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 50) : 25
+
+  // ── Factor 2: Experience level alignment (20 pts) ────────────────────────────
+  const jobLevel = detectExperienceFromTitle(jobTitle)
+  const seekerLevel = detectSeekerLevel(hasResume ? resumeText : '')
+  const levels = ['Entry Level', 'Mid Level', 'Senior Level']
+  const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
+  const levelScore = diff === 0 ? 20 : diff === 1 ? 12 : 4
+
+  // ── Factor 3: Work mode fit (15 pts) ─────────────────────────────────────────
+  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === workMode || workMode === 'hybrid') ? 15 : 4
+
+  // ── Factor 4: Location fit (15 pts) ──────────────────────────────────────────
+  const cityScore = seeker.city && jobCity && seeker.city.toLowerCase() === jobCity.toLowerCase() ? 15 : 0
+
+  return Math.round(Math.min(100, keywordScore + levelScore + modeScore + cityScore))
 }
 
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
-  if (!seeker) return 0
-  const required = opp.skills_required || []
-  const resumeText = seeker.resume_text?.toLowerCase() || ''
-  const hasResume = resumeText.length > 50
-  const source = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
-
-  let skillScore = 0
-  if (required.length > 0) {
-    const matched = required.filter((r) => source.includes(r.toLowerCase())).length
-    skillScore = tieredSkillScore(matched)
-  } else {
-    skillScore = 45 // open to anyone
-  }
-
-  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === opp.work_mode || opp.work_mode === 'hybrid') ? 20 : 5
-  const cityScore = seeker.city && opp.city && seeker.city.toLowerCase() === opp.city.toLowerCase() ? 15 : 0
-  return Math.round(Math.min(100, skillScore + modeScore + cityScore))
+  return computeJobMatch(seeker, opp.title, opp.description || '', opp.skills_required || [], opp.work_mode, opp.city)
 }
 
 function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
-  if (!seeker || seeker.skills.length === 0) return 0
-  const jobText = (job.title + ' ' + (job.description || '')).toLowerCase()
-  const resumeText = seeker.resume_text?.toLowerCase() || ''
-  const hasResume = resumeText.length > 50
-
-  let matchedCount = 0
-  if (hasResume) {
-    // Skills that appear in both resume AND job (high confidence)
-    const inResume = skillsMatch(seeker.skills, resumeText)
-    const inJob = skillsMatch(seeker.skills, jobText)
-    const inBoth = seeker.skills.filter((s) => resumeText.includes(s.toLowerCase()) && jobText.includes(s.toLowerCase())).length
-    // Weight: confirmed in both > just in job > just in resume
-    matchedCount = inBoth * 2 + Math.max(0, inJob - inBoth)
-    matchedCount = Math.min(seeker.skills.length, matchedCount)
-    // Give partial credit even if only resume or only job matches
-    if (matchedCount === 0 && (inResume > 0 || inJob > 0)) matchedCount = 0.5
-  } else {
-    matchedCount = skillsMatch(seeker.skills, jobText)
-  }
-
-  const skillScore = tieredSkillScore(matchedCount)
-  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === job.work_mode || job.work_mode === 'hybrid') ? 20 : 5
-  const cityScore = seeker.city && job.city && seeker.city.toLowerCase() === job.city.toLowerCase() ? 15 : 0
-  return Math.round(Math.min(100, skillScore + modeScore + cityScore))
+  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city)
 }
 
 // ─── ATS Keyword Analysis ────────────────────────────────────────────────────
@@ -130,18 +147,37 @@ const KNOWN_SKILLS = [
   // Analytics & Advertising
   'Tableau','Power BI','Looker','Google Analytics','Google Ads','Facebook Ads',
   'LinkedIn Ads','SEMrush','Ahrefs','Google Search Console','Google Tag Manager',
-  // Development
+  // Web & General Development
   'SQL','Python','Java','JavaScript','TypeScript','React','HTML','CSS','PHP',
-  'R','VBA','Git','WordPress','Shopify',
+  'R','VBA','Git','WordPress','Shopify','Node.js','Express','Next.js','Vue','Angular',
+  'jQuery','REST API','GraphQL','JSON','XML','Bash','Shell scripting',
+  // .NET Ecosystem
+  '.NET','.NET Core','C#','ASP.NET','ASP.NET Core','Entity Framework','LINQ','WPF','WCF',
+  'Blazor','MAUI','NuGet','Visual Studio',
+  // Cloud & DevOps
+  'Azure','AWS','GCP','Google Cloud','Azure DevOps','Azure AD','AWS Lambda',
+  'S3','EC2','Docker','Kubernetes','CI/CD','Jenkins','GitHub Actions','Terraform',
+  'Ansible','Linux','Unix','Nginx','Apache',
+  // Databases
+  'MySQL','PostgreSQL','SQL Server','MongoDB','Redis','Cosmos DB','Oracle DB',
+  'DynamoDB','Firebase','Elasticsearch',
+  // Mobile
+  'iOS','Android','Swift','Kotlin','React Native','Flutter','Xamarin',
+  // Testing & QA
+  'unit testing','integration testing','Selenium','Jest','NUnit','xUnit','Postman',
+  'test automation','QA','quality assurance','TDD','BDD',
+  // Security
+  'cybersecurity','network security','SIEM','penetration testing','IAM','CISSP',
   // Finance & Accounting
   'QuickBooks','Xero','Sage','SAP','Oracle','NetSuite','Workday','FreshBooks',
   'financial modeling','GAAP','IFRS','accounts payable','accounts receivable',
   // Project Management Tools
   'Jira','Trello','Asana','Monday.com','Notion','Airtable','ClickUp','MS Project','Basecamp',
   // Methodologies & Frameworks
-  'Agile','Scrum','Kanban','Lean','Six Sigma','Waterfall','PRINCE2',
+  'Agile','Scrum','Kanban','Lean','Six Sigma','Waterfall','PRINCE2','SAFe','DevOps',
   // Certifications
-  'PMP','CAPM','PMBOK','ITIL','CPA','CFA','MBA','CHRP',
+  'PMP','CAPM','PMBOK','ITIL','CPA','CFA','MBA','CHRP','AWS Certified','Azure Certified',
+  'Google Cloud Certified','CompTIA','CISSP','Scrum Master','CSM',
   // Digital Marketing
   'SEO','SEM','PPC','content marketing','digital marketing','email marketing',
   'social media marketing','copywriting','brand management','influencer marketing','A/B testing',
@@ -152,12 +188,13 @@ const KNOWN_SKILLS = [
   // Data & Analysis
   'data analysis','data visualization','business analysis','financial analysis',
   'forecasting','budgeting','variance analysis','reporting','dashboards',
+  'machine learning','AI','data science','NLP','ETL','data warehousing','Power Query',
   // HR
   'HRIS','talent acquisition','recruitment','onboarding','performance management',
   'payroll','employee relations','workforce planning','benefits administration',
   // Operations
   'supply chain','logistics','procurement','inventory management','vendor management',
-  'operations management','quality assurance','compliance',
+  'operations management','compliance',
   // Customer-facing
   'customer service','account management','client relations','customer success',
   'sales','business development','cold calling','CRM management',
@@ -233,8 +270,8 @@ function extractJobKeywords(title: string, description: string, requiredSkills: 
     .slice(0, 28)
 }
 
-function ATSPanel({ resumeText, jobTitle, jobDescription, requiredSkills }: {
-  resumeText: string; jobTitle: string; jobDescription: string; requiredSkills?: string[]
+function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity }: {
+  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string
 }) {
   const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
   if (!keywords.length) return null
@@ -250,13 +287,13 @@ function ATSPanel({ resumeText, jobTitle, jobDescription, requiredSkills }: {
           <a href="/profile/setup" className="text-[11px] text-purple-600 hover:underline font-medium">Upload resume to check match →</a>
         </div>
         <div className="flex flex-wrap gap-1">
-          {keywords.map(({ keyword, required }) => (
+          {keywords.slice(0, 12).map(({ keyword, required }) => (
             <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
               {required && '★ '}{keyword}
             </span>
           ))}
         </div>
-        <p className="text-[10px] text-gray-400 mt-2">★ = explicitly required by employer</p>
+        <p className="text-[10px] text-gray-400 mt-2">★ = explicitly required · Upload resume for full match analysis</p>
       </div>
     )
   }
@@ -264,76 +301,137 @@ function ATSPanel({ resumeText, jobTitle, jobDescription, requiredSkills }: {
   const lower = resumeText.toLowerCase()
   const matched = keywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase()))
   const missing = keywords.filter(({ keyword }) => !lower.includes(keyword.toLowerCase()))
-  const pct = Math.round((matched.length / keywords.length) * 100)
+  const atsPct = Math.round((matched.length / keywords.length) * 100)
 
-  // Suitability verdict
-  const verdict = pct >= 70
-    ? { label: 'Strong Match', sub: 'Your resume closely aligns with this role.', color: 'bg-green-50 border-green-200 text-green-800' }
-    : pct >= 45
-    ? { label: 'Good Match', sub: 'You meet most requirements. Address the gaps below.', color: 'bg-yellow-50 border-yellow-200 text-yellow-800' }
-    : pct >= 25
-    ? { label: 'Partial Match', sub: 'Transferable experience may bridge some gaps — see tips below.', color: 'bg-orange-50 border-orange-200 text-orange-800' }
-    : { label: 'Stretch Role', sub: 'Significant gaps exist. Consider this a target role to work towards.', color: 'bg-red-50 border-red-200 text-red-800' }
+  // Unified overall score
+  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity)
 
-  const barColor = pct >= 70 ? 'bg-green-500' : pct >= 45 ? 'bg-yellow-400' : pct >= 25 ? 'bg-orange-400' : 'bg-red-400'
+  // Score breakdown factors (mirrors computeJobMatch logic, for display)
+  const weightedMatched = matched.reduce((s, { required }) => s + (required ? 2 : 1), 0)
+  const weightedTotal = keywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 50) : 25
+  const jobLevel = detectExperienceFromTitle(jobTitle)
+  const seekerLevel = detectSeekerLevel(resumeText)
+  const levels = ['Entry Level', 'Mid Level', 'Senior Level']
+  const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
+  const levelScore = diff === 0 ? 20 : diff === 1 ? 12 : 4
+  const modeScore = seekerProfile ? ((seekerProfile.work_preference === 'any' || seekerProfile.work_preference === workMode || workMode === 'hybrid') ? 15 : 4) : 0
+  const cityScore = seekerProfile?.city && jobCity && seekerProfile.city.toLowerCase() === jobCity.toLowerCase() ? 15 : 0
 
-  // Find bridgeable gaps
+  // Application strategy
+  const strategy = overallPct >= 75
+    ? { label: '✅ Apply Now', sub: 'Your profile is a strong fit. Tailor your cover letter to the keywords below.', color: 'bg-green-50 border-green-200 text-green-800' }
+    : overallPct >= 55
+    ? { label: '📝 Apply with a Tailored Resume', sub: 'Good fit — use the Resume Builder to tailor your resume before applying.', color: 'bg-yellow-50 border-yellow-200 text-yellow-700' }
+    : overallPct >= 35
+    ? { label: '🎯 Bridge the Gaps First', sub: 'Address the missing keywords below, then apply. See bridgeable gaps for quick wins.', color: 'bg-orange-50 border-orange-200 text-orange-700' }
+    : { label: '📚 Build Toward This Role', sub: 'Significant experience gaps exist. Treat this as a target — focus on the skills listed below.', color: 'bg-red-50 border-red-200 text-red-700' }
+
+  const barColor = overallPct >= 75 ? 'bg-green-500' : overallPct >= 55 ? 'bg-yellow-400' : overallPct >= 35 ? 'bg-orange-400' : 'bg-red-400'
+
+  // Separate required missing keywords (critical gaps) from optional
+  const missingRequired = missing.filter(({ required }) => required)
+  const missingOptional = missing.filter(({ required }) => !required)
   const bridgeable = missing.filter(({ keyword }) => SKILL_BRIDGES[keyword.toLowerCase()])
-  const hardGaps = missing.filter(({ keyword }) => !SKILL_BRIDGES[keyword.toLowerCase()])
 
   return (
     <div className="mt-3 pt-3 border-t border-dashed border-purple-100 space-y-3">
-      {/* Header + verdict */}
+
+      {/* Overall match score + bar */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1.5">
           <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-            <Target size={12} className="text-purple-500" /> ATS Keyword Match
+            <Target size={12} className="text-purple-500" /> Match Analysis
           </span>
-          <span className="text-xs font-bold text-gray-500">{pct}% · {matched.length}/{keywords.length} keywords</span>
+          <span className="text-xs font-bold text-gray-600">{overallPct}% overall match</span>
         </div>
         <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
-          <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+          <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${overallPct}%` }} />
         </div>
-        <div className={`rounded-lg border px-3 py-2 ${verdict.color}`}>
-          <p className="text-xs font-bold">{verdict.label}</p>
-          <p className="text-[11px] mt-0.5 opacity-90">{verdict.sub}</p>
+
+        {/* Score breakdown */}
+        <div className="grid grid-cols-2 gap-1.5 mb-2">
+          {[
+            { label: 'Keywords & Skills', score: keywordScore, max: 50 },
+            { label: 'Experience Level', score: levelScore, max: 20 },
+            { label: 'Work Mode', score: modeScore, max: 15 },
+            { label: 'Location', score: cityScore, max: 15 },
+          ].map(({ label, score, max }) => (
+            <div key={label} className="bg-gray-50 rounded-lg px-2 py-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] text-gray-500">{label}</span>
+                <span className="text-[10px] font-bold text-gray-700">{score}/{max}</span>
+              </div>
+              <div className="h-1 bg-gray-200 rounded-full mt-1 overflow-hidden">
+                <div className={`h-full rounded-full ${score >= max * 0.7 ? 'bg-green-400' : score >= max * 0.4 ? 'bg-yellow-400' : 'bg-red-400'}`} style={{ width: `${(score / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Application strategy */}
+        <div className={`rounded-lg border px-3 py-2 ${strategy.color}`}>
+          <p className="text-xs font-bold">{strategy.label}</p>
+          <p className="text-[11px] mt-0.5 opacity-90">{strategy.sub}</p>
         </div>
       </div>
 
-      {/* Found keywords */}
-      {matched.length > 0 && (
-        <div>
-          <p className="text-[10px] text-green-600 uppercase tracking-wide font-semibold mb-1.5">✓ Keywords found in your resume ({matched.length})</p>
-          <div className="flex flex-wrap gap-1">
-            {matched.map(({ keyword, required }) => (
-              <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${required ? 'bg-green-100 text-green-800 border-green-300' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                {required && '★ '}{keyword}
-              </span>
-            ))}
-          </div>
+      {/* ATS keyword breakdown */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">ATS Keywords</span>
+          <span className="text-[10px] text-gray-400">{matched.length}/{keywords.length} found · {atsPct}%</span>
         </div>
-      )}
 
-      {/* Hard gaps — not bridgeable */}
-      {hardGaps.length > 0 && (
-        <div>
-          <p className="text-[10px] text-red-500 uppercase tracking-wide font-semibold mb-1.5">✗ Missing keywords — add to your resume ({hardGaps.length})</p>
-          <div className="flex flex-wrap gap-1">
-            {hardGaps.map(({ keyword, required }) => (
-              <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-red-100 text-red-700 border-red-300 font-semibold' : 'bg-red-50 text-red-600 border-red-200'}`}>
-                {required && '★ '}{keyword}
-              </span>
-            ))}
+        {/* Matched */}
+        {matched.length > 0 && (
+          <div className="mb-2">
+            <p className="text-[10px] text-green-600 font-semibold mb-1">✓ Found in your resume</p>
+            <div className="flex flex-wrap gap-1">
+              {matched.map(({ keyword, required }) => (
+                <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-green-100 text-green-800 border-green-300 font-semibold' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                  {required && '★ '}{keyword}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Critical missing (required) */}
+        {missingRequired.length > 0 && (
+          <div className="mb-2">
+            <p className="text-[10px] text-red-600 font-semibold mb-1">★ Critical gaps — required by employer</p>
+            <div className="flex flex-wrap gap-1">
+              {missingRequired.map(({ keyword }) => (
+                <span key={keyword} className="text-[11px] px-2 py-0.5 rounded-full border bg-red-100 text-red-700 border-red-300 font-semibold">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Optional missing */}
+        {missingOptional.length > 0 && (
+          <div className="mb-2">
+            <p className="text-[10px] text-gray-500 font-semibold mb-1">✗ Not found — consider adding if relevant</p>
+            <div className="flex flex-wrap gap-1">
+              {missingOptional.slice(0, 10).map(({ keyword }) => (
+                <span key={keyword} className="text-[11px] px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">
+                  {keyword}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Bridgeable gaps with tips */}
       {bridgeable.length > 0 && (
         <div>
-          <p className="text-[10px] text-amber-600 uppercase tracking-wide font-semibold mb-1.5">💡 Bridgeable gaps — you can address these ({bridgeable.length})</p>
+          <p className="text-[10px] text-amber-600 uppercase tracking-wide font-semibold mb-1.5">💡 Quick wins — bridge these gaps</p>
           <div className="space-y-1.5">
-            {bridgeable.map(({ keyword }) => (
+            {bridgeable.slice(0, 3).map(({ keyword }) => (
               <div key={keyword} className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
                 <p className="text-[11px] font-semibold text-amber-800">{keyword}</p>
                 <p className="text-[11px] text-amber-700 mt-0.5">{SKILL_BRIDGES[keyword.toLowerCase()]}</p>
@@ -634,7 +732,7 @@ function OpportunitiesInner() {
                     {seekerProfile && (
                       <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
                         <MatchBar pct={pct} fromResume={fromResume} />
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} />
+                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} workMode={opp.work_mode} jobCity={opp.city} />
                       </div>
                     )}
                   </div>
@@ -729,7 +827,7 @@ function OpportunitiesInner() {
 
                       {seekerProfile && <MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} />}
                       {seekerProfile && (
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} jobTitle={job.title} jobDescription={job.description || ''} />
+                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={job.title} jobDescription={job.description || ''} workMode={job.work_mode} jobCity={job.city} />
                       )}
                     </div>
                   )
