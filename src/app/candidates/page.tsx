@@ -71,6 +71,7 @@ function MatchBar({ pct }: { pct: number }) {
 }
 
 export default function CandidatesPage() {
+  const router = useRouter()
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [filtered, setFiltered] = useState<Candidate[]>([])
   const [search, setSearch] = useState('')
