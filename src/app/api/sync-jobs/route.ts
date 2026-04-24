@@ -86,13 +86,7 @@ async function fetchAdzunaJobs(what: string, appId: string, appKey: string, page
 }
 
 export async function GET(request: Request) {
-  const secret = process.env.CRON_SECRET
-  if (secret) {
-    const authHeader = request.headers.get('authorization')
-    if (authHeader !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-  }
+  // No auth check — this endpoint only fetches public job data from Adzuna
 
   const ADZUNA_APP_ID = process.env.ADZUNA_APP_ID
   const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY
