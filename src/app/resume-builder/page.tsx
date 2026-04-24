@@ -22,7 +22,17 @@ type ResumeEducation = {
   year: string
 }
 
+type ResumeContact = {
+  name: string
+  city: string | null
+  province: string | null
+  phone: string | null
+  email: string | null
+  linkedin: string | null
+}
+
 type GeneratedResume = {
+  contact: ResumeContact
   summary: string
   competencies: string[]
   competencyCount: number
@@ -130,6 +140,15 @@ export default function ResumeBuilderPage() {
   const getResumeText = () => {
     if (!resume) return ''
     const lines: string[] = []
+
+    // Header
+    if (resume.contact) {
+      lines.push(resume.contact.name.toUpperCase())
+      const locationParts = [resume.contact.city, resume.contact.province].filter(Boolean).join(', ')
+      const contactParts = [locationParts, resume.contact.phone, resume.contact.email, resume.contact.linkedin].filter(Boolean).join('  ·  ')
+      if (contactParts) lines.push(contactParts)
+      lines.push('')
+    }
 
     lines.push('PROFESSIONAL SUMMARY')
     lines.push('─'.repeat(60))
@@ -375,6 +394,32 @@ export default function ResumeBuilderPage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden print:shadow-none print:border-none" id="resume-print">
+
+              {/* Contact Header */}
+              {resume.contact && (
+                <section className="p-6 pb-5 border-b border-gray-100 text-center">
+                  <h2 className="text-2xl font-bold text-gray-900 tracking-wide mb-2">
+                    {resume.contact.name}
+                  </h2>
+                  <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                    {(resume.contact.city || resume.contact.province) && (
+                      <span>{[resume.contact.city, resume.contact.province].filter(Boolean).join(', ')}</span>
+                    )}
+                    {resume.contact.phone && (
+                      <><span className="text-gray-300">·</span><span>{resume.contact.phone}</span></>
+                    )}
+                    {resume.contact.email && (
+                      <><span className="text-gray-300">·</span><span>{resume.contact.email}</span></>
+                    )}
+                    {resume.contact.linkedin && (
+                      <><span className="text-gray-300">·</span>
+                      <a href={resume.contact.linkedin} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                        LinkedIn
+                      </a></>
+                    )}
+                  </div>
+                </section>
+              )}
 
               {/* Professional Summary */}
               <section className="p-6 border-b border-gray-100">

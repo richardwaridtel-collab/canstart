@@ -44,6 +44,14 @@ Avoid buzzwords, corporate speak, and anything that sounds AI-generated.
 Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
 
 {
+  "contact": {
+    "name": "Full Name",
+    "city": "City",
+    "province": "Province or Country",
+    "phone": "phone number or null",
+    "email": "email address or null",
+    "linkedin": "linkedin URL or null"
+  },
   "summary": "3-4 sentence professional summary tailored to the job, human tone",
   "competencies": ["skill1", "skill2", ...],
   "competencyCount": 9,
@@ -67,6 +75,7 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
   ] or null
 }
 
+For contact: extract name, city, province, phone, email, and LinkedIn from the original resume. Set any missing fields to null.
 For competencies: choose exactly 9 or 12 skills matching the job description and candidate background.
 For certifications and tools: only include if present in the original resume. Otherwise set to null.
 For education: only include if mentioned in the original resume. Otherwise set to null.`
