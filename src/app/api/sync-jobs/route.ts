@@ -123,6 +123,7 @@ export async function GET(request: Request) {
           salary_min: job.salary_min || null,
           salary_max: job.salary_max || null,
           work_mode: workMode,
+          posted_at: job.created || null,
           synced_at: new Date().toISOString(),
         }
 
@@ -144,7 +145,10 @@ export async function GET(request: Request) {
   }
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-  await supabase.from('external_opportunities').delete().lt('synced_at', thirtyDaysAgo)
+  // Remove jobs published over 30 days ago (using actual Adzuna publish date where available)
+  await supabase.from('external_opportunities').delete().lt('posted_at', thirtyDaysAgo).not('posted_at', 'is', null)
+  // Fallback: also remove by synced_at for any rows missing posted_at
+  await supabase.from('external_opportunities').delete().lt('synced_at', thirtyDaysAgo).is('posted_at', null)
 
   return NextResponse.json({
     success: true,

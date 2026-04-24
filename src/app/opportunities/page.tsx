@@ -44,10 +44,33 @@ type ExternalJob = {
   salary_min?: number
   salary_max?: number
   work_mode: string
+  posted_at?: string
   synced_at: string
 }
 
+const DATE_FILTERS = [
+  { label: 'Any time',     days: 0  },
+  { label: 'Last 24 hrs',  days: 1  },
+  { label: 'Last 3 days',  days: 3  },
+  { label: 'Last 5 days',  days: 5  },
+  { label: 'Last 7 days',  days: 7  },
+  { label: 'Last 15 days', days: 15 },
+  { label: 'Last month',   days: 30 },
+]
+
 type SeekerProfile = { skills: string[]; work_preference: string; city: string; resume_text?: string }
+
+function formatPostedDate(dateStr: string): string {
+  const diffMs = Date.now() - new Date(dateStr).getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays <= 6) return `${diffDays}d ago`
+  if (diffDays <= 13) return '1 week ago'
+  if (diffDays <= 20) return '2 weeks ago'
+  if (diffDays <= 27) return '3 weeks ago'
+  return `${Math.floor(diffDays / 7)}w ago`
+}
 
 function detectExperienceFromTitle(title: string): string {
   const t = title.toLowerCase()
@@ -616,6 +639,7 @@ function OpportunitiesInner() {
   const [category, setCategory] = useState('All Categories')
   const [experience, setExperience] = useState('Any Level')
   const [activeTab, setActiveTab] = useState<'canstart' | 'external'>('external')
+  const [dateFilter, setDateFilter] = useState(0) // 0 = any time, N = last N days
   const [loading, setLoading] = useState(false)
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
@@ -662,9 +686,17 @@ function OpportunitiesInner() {
       ext = ext.filter((o) => detectExperienceFromTitle(o.title) === experience)
     }
 
+    if (dateFilter > 0) {
+      const cutoff = Date.now() - dateFilter * 24 * 60 * 60 * 1000
+      ext = ext.filter((o) => {
+        const dateStr = o.posted_at || o.synced_at
+        return dateStr ? new Date(dateStr).getTime() >= cutoff : true
+      })
+    }
+
     setFilteredCanstart(cs)
     setFilteredExternal(ext)
-  }, [search, city, type, mode, category, experience, canstartJobs, externalJobs])
+  }, [search, city, type, mode, category, experience, dateFilter, canstartJobs, externalJobs])
 
   const checkAuth = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -750,8 +782,8 @@ function OpportunitiesInner() {
   }
 
   const handleSearch = (val: string) => { setSearch(val); if (val.length > 2) track('opportunity_search', { query: val }) }
-  const clearFilters = () => { setCity('All Cities'); setType('All Types'); setMode('All Modes'); setCategory('All Categories'); setExperience('Any Level'); setSearch('') }
-  const hasFilters = city !== 'All Cities' || type !== 'All Types' || mode !== 'All Modes' || category !== 'All Categories' || experience !== 'Any Level' || search
+  const clearFilters = () => { setCity('All Cities'); setType('All Types'); setMode('All Modes'); setCategory('All Categories'); setExperience('Any Level'); setDateFilter(0); setSearch('') }
+  const hasFilters = city !== 'All Cities' || type !== 'All Types' || mode !== 'All Modes' || category !== 'All Categories' || experience !== 'Any Level' || dateFilter > 0 || search
 
   const formatSalary = (min?: number, max?: number) => {
     if (!min && !max) return null
@@ -825,9 +857,17 @@ function OpportunitiesInner() {
             </>
           )}
           {activeTab === 'external' && (
-            <select value={mode} onChange={(e) => setMode(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-              {MODES.map((m) => <option key={m} value={m}>{m === 'All Modes' ? m : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
-            </select>
+            <>
+              <select value={mode} onChange={(e) => setMode(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
+                {MODES.map((m) => <option key={m} value={m}>{m === 'All Modes' ? m : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+              </select>
+              <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2">
+                <Calendar size={14} className="text-gray-400" />
+                <select value={dateFilter} onChange={(e) => setDateFilter(Number(e.target.value))} className="py-2 text-sm text-gray-700 focus:outline-none bg-transparent">
+                  {DATE_FILTERS.map(({ label, days }) => <option key={days} value={days}>{label}</option>)}
+                </select>
+              </div>
+            </>
           )}
           {hasFilters && <button onClick={clearFilters} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear filters</button>}
         </div>
@@ -918,6 +958,9 @@ function OpportunitiesInner() {
                         {formatSalary(job.salary_min, job.salary_max) && (
                           <span className="text-green-600 font-medium">{formatSalary(job.salary_min, job.salary_max)}</span>
                         )}
+                        {(job.posted_at || job.synced_at) && (
+                          <span className="flex items-center gap-1 ml-auto"><Calendar size={11} />{formatPostedDate(job.posted_at || job.synced_at)}</span>
+                        )}
                       </div>
 
                       {/* Action buttons */}
@@ -984,8 +1027,8 @@ function OpportunitiesInner() {
                 {formatSalary(selectedJob.salary_min, selectedJob.salary_max) && (
                   <span className="text-green-600 font-medium">{formatSalary(selectedJob.salary_min, selectedJob.salary_max)}</span>
                 )}
-                {selectedJob.synced_at && (
-                  <span className="flex items-center gap-1"><Calendar size={14} />Posted {new Date(selectedJob.synced_at).toLocaleDateString('en-CA')}</span>
+                {(selectedJob.posted_at || selectedJob.synced_at) && (
+                  <span className="flex items-center gap-1"><Calendar size={14} />Posted {new Date(selectedJob.posted_at || selectedJob.synced_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 )}
               </div>
             </div>
