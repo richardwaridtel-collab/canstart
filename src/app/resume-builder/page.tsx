@@ -38,6 +38,8 @@ export default function ResumeBuilderPage() {
 
   const [authChecked, setAuthChecked] = useState(false)
   const [resumeFile, setResumeFile] = useState<File | null>(null)
+  const [resumePasteText, setResumePasteText] = useState('')
+  const [useTextInput, setUseTextInput] = useState(false)
   const [jobDescription, setJobDescription] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -77,8 +79,16 @@ export default function ResumeBuilderPage() {
   }
 
   const handleGenerate = async () => {
-    if (!resumeFile || !jobDescription.trim()) {
-      setError('Please upload your resume and paste the job description.')
+    if (useTextInput && !resumePasteText.trim()) {
+      setError('Please paste your resume text.')
+      return
+    }
+    if (!useTextInput && !resumeFile) {
+      setError('Please upload your resume file.')
+      return
+    }
+    if (!jobDescription.trim()) {
+      setError('Please paste the job description.')
       return
     }
     setError('')
@@ -87,7 +97,14 @@ export default function ResumeBuilderPage() {
 
     try {
       const formData = new FormData()
-      formData.append('resume', resumeFile)
+      if (useTextInput) {
+        // Create a text file from pasted content
+        const textBlob = new Blob([resumePasteText], { type: 'text/plain' })
+        const textFile = new File([textBlob], 'resume.txt', { type: 'text/plain' })
+        formData.append('resume', textFile)
+      } else {
+        formData.append('resume', resumeFile!)
+      }
       formData.append('jobDescription', jobDescription)
 
       const res = await fetch('/api/resume-builder', { method: 'POST', body: formData })
@@ -205,41 +222,61 @@ export default function ResumeBuilderPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           {/* Resume Upload */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Your Current Resume <span className="text-red-500">*</span>
-            </label>
-            <div
-              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
-                dragOver ? 'border-red-400 bg-red-50' :
-                resumeFile ? 'border-green-400 bg-green-50' :
-                'border-gray-300 bg-white hover:border-red-400 hover:bg-red-50'
-              }`}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={handleDrop}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.docx"
-                className="hidden"
-                onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
-              />
-              {resumeFile ? (
-                <div className="space-y-1">
-                  <CheckCircle size={32} className="mx-auto text-green-500" />
-                  <p className="font-semibold text-green-700 text-sm">{resumeFile.name}</p>
-                  <p className="text-xs text-green-600">Click to replace</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Upload size={32} className="mx-auto text-gray-400" />
-                  <p className="text-sm font-medium text-gray-600">Drop your resume here or click to browse</p>
-                  <p className="text-xs text-gray-400">PDF or DOCX · Max 5MB</p>
-                </div>
-              )}
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-gray-700">
+                Your Current Resume <span className="text-red-500">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => { setUseTextInput(!useTextInput); setError('') }}
+                className="text-xs text-red-600 hover:text-red-700 font-medium underline"
+              >
+                {useTextInput ? 'Upload file instead' : 'Paste text instead'}
+              </button>
             </div>
+
+            {useTextInput ? (
+              <textarea
+                value={resumePasteText}
+                onChange={(e) => setResumePasteText(e.target.value)}
+                placeholder="Copy and paste all text from your resume here..."
+                rows={8}
+                className="w-full px-4 py-3 border border-gray-300 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none bg-white"
+              />
+            ) : (
+              <div
+                className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+                  dragOver ? 'border-red-400 bg-red-50' :
+                  resumeFile ? 'border-green-400 bg-green-50' :
+                  'border-gray-300 bg-white hover:border-red-400 hover:bg-red-50'
+                }`}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx"
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
+                />
+                {resumeFile ? (
+                  <div className="space-y-1">
+                    <CheckCircle size={32} className="mx-auto text-green-500" />
+                    <p className="font-semibold text-green-700 text-sm">{resumeFile.name}</p>
+                    <p className="text-xs text-green-600">Click to replace · If PDF fails, try DOCX or paste text</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Upload size={32} className="mx-auto text-gray-400" />
+                    <p className="text-sm font-medium text-gray-600">Drop your resume here or click to browse</p>
+                    <p className="text-xs text-gray-400">DOCX recommended · PDF also supported · Max 5MB</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Job Description */}
@@ -290,7 +327,7 @@ export default function ResumeBuilderPage() {
         {/* Generate Button */}
         <button
           onClick={handleGenerate}
-          disabled={loading || !resumeFile || !jobDescription.trim()}
+          disabled={loading || (!resumeFile && !resumePasteText.trim()) || !jobDescription.trim()}
           className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 text-lg transition-colors"
         >
           {loading ? (

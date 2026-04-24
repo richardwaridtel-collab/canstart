@@ -88,19 +88,24 @@ export async function POST(request: Request) {
     try {
       if (ext === 'pdf') {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (buf: Buffer, opts?: object) => Promise<{ text: string }>
-        const result = await pdfParse(buffer, {})
+        const pdfParse = require('pdf-parse/lib/pdf-parse.js') as (buf: Buffer) => Promise<{ text: string }>
+        const result = await pdfParse(buffer)
         resumeText = result.text
       } else if (ext === 'docx') {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const mammoth = require('mammoth') as { extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }> }
         const result = await mammoth.extractRawText({ buffer })
         resumeText = result.value
+      } else if (ext === 'txt') {
+        resumeText = buffer.toString('utf-8')
       } else {
-        return NextResponse.json({ error: 'Please upload a PDF or DOCX file' }, { status: 400 })
+        return NextResponse.json({ error: 'Please upload a PDF, DOCX, or paste your resume as text.' }, { status: 400 })
       }
-    } catch {
-      return NextResponse.json({ error: 'Could not read the resume file. Please try a different file.' }, { status: 400 })
+    } catch (parseErr) {
+      console.error('Parse error:', parseErr)
+      return NextResponse.json({
+        error: 'Could not read the file. Please try the "Paste Resume Text" option instead.'
+      }, { status: 400 })
     }
 
     if (!resumeText.trim()) {
