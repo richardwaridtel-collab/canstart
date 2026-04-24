@@ -6,20 +6,27 @@ const ADZUNA_BASE = 'https://api.adzuna.com/v1/api/jobs/ca/search'
 const CANADIAN_CITIES = ['Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
 
 const SEARCH_QUERIES = [
-  { what: 'marketing manager', category: 'Marketing' },
-  { what: 'digital marketing', category: 'Marketing' },
-  { what: 'marketing coordinator', category: 'Marketing' },
-  { what: 'content marketing', category: 'Marketing' },
+  { what: 'marketing manager', category: 'Marketing & Communications' },
+  { what: 'digital marketing', category: 'Marketing & Communications' },
+  { what: 'marketing coordinator', category: 'Marketing & Communications' },
+  { what: 'content marketing', category: 'Marketing & Communications' },
+  { what: 'communications coordinator', category: 'Marketing & Communications' },
   { what: 'project manager', category: 'Project Management' },
   { what: 'project coordinator', category: 'Project Management' },
   { what: 'junior project manager', category: 'Project Management' },
   { what: 'data analyst', category: 'Data & Analytics' },
   { what: 'business analyst', category: 'Business Analysis' },
   { what: 'hr coordinator', category: 'Human Resources' },
+  { what: 'human resources', category: 'Human Resources' },
   { what: 'accountant bookkeeper', category: 'Finance & Accounting' },
+  { what: 'financial analyst', category: 'Finance & Accounting' },
   { what: 'customer service', category: 'Customer Service' },
-  { what: 'administrative assistant', category: 'Administration' },
-  { what: 'software developer junior', category: 'Technology' },
+  { what: 'administrative assistant', category: 'Administration & Office' },
+  { what: 'office coordinator', category: 'Administration & Office' },
+  { what: 'software developer junior', category: 'Technology & IT' },
+  { what: '.net developer', category: 'Technology & IT' },
+  { what: 'sales representative', category: 'Sales & Business Development' },
+  { what: 'account manager', category: 'Sales & Business Development' },
 ]
 
 interface AdzunaJob {
@@ -113,7 +120,7 @@ export async function GET(request: Request) {
           title: job.title,
           company: job.company.display_name,
           city,
-          description: (job.description || '').slice(0, 1000),
+          description: job.description || '',
           url: job.redirect_url,
           category,
           salary_min: job.salary_min || null,

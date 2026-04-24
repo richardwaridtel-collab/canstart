@@ -114,25 +114,47 @@ const DOMAIN_SIGNALS: Record<string, string[]> = {
   ],
 }
 
-// Maps the explicit job category field to a domain string.
-// Using the category field is far more reliable than trying to infer domain from description text.
-const CATEGORY_TO_DOMAIN: Record<string, string> = {
-  'marketing & communications': 'marketing',
-  'technology & it': 'tech',
-  'finance & accounting': 'finance',
-  'human resources': 'hr',
-  'sales & business development': 'sales',
-  'data & analytics': 'data',
-  'design & creative': 'design',
-  'operations & logistics': 'operations',
-  'project management': 'pm',
-  'customer service': 'customer',
-  'administration & office': 'admin',
-  'business analysis': 'data',
-  'education & training': 'education',
-  'healthcare & social services': 'healthcare',
-  'engineering': 'engineering',
-  'legal & compliance': 'legal',
+// Maps job category → domain. Partial/prefix matching handles both
+// old truncated values ('Marketing', 'Technology') and new full values ('Marketing & Communications').
+const CATEGORY_DOMAIN_MAP: Array<{ match: string; domain: string }> = [
+  { match: 'marketing',           domain: 'marketing' },
+  { match: 'communications',      domain: 'marketing' },
+  { match: 'technology',          domain: 'tech' },
+  { match: 'it ',                 domain: 'tech' },
+  { match: ' it',                 domain: 'tech' },
+  { match: 'software',            domain: 'tech' },
+  { match: 'finance',             domain: 'finance' },
+  { match: 'accounting',          domain: 'finance' },
+  { match: 'human resources',     domain: 'hr' },
+  { match: ' hr',                 domain: 'hr' },
+  { match: 'sales',               domain: 'sales' },
+  { match: 'business development',domain: 'sales' },
+  { match: 'data & analytics',    domain: 'data' },
+  { match: 'data analytics',      domain: 'data' },
+  { match: 'business analysis',   domain: 'data' },
+  { match: 'design',              domain: 'design' },
+  { match: 'creative',            domain: 'design' },
+  { match: 'operations',          domain: 'operations' },
+  { match: 'logistics',           domain: 'operations' },
+  { match: 'project management',  domain: 'pm' },
+  { match: 'customer service',    domain: 'customer' },
+  { match: 'administration',      domain: 'admin' },
+  { match: 'office',              domain: 'admin' },
+  { match: 'education',           domain: 'education' },
+  { match: 'training',            domain: 'education' },
+  { match: 'healthcare',          domain: 'healthcare' },
+  { match: 'health',              domain: 'healthcare' },
+  { match: 'engineering',         domain: 'engineering' },
+  { match: 'legal',               domain: 'legal' },
+  { match: 'compliance',          domain: 'legal' },
+]
+
+function categoryToDomain(category: string): string {
+  const lower = (category || '').toLowerCase()
+  for (const { match, domain } of CATEGORY_DOMAIN_MAP) {
+    if (lower.includes(match)) return domain
+  }
+  return 'unknown'
 }
 
 function detectDomain(text: string): string {
@@ -146,8 +168,7 @@ function detectDomain(text: string): string {
 }
 
 function computeIndustryScore(candidateText: string, jobCategory: string): number {
-  // Use the explicit category field for the job domain — much more reliable
-  const jobDomain = CATEGORY_TO_DOMAIN[jobCategory?.toLowerCase().trim()] || 'unknown'
+  const jobDomain = categoryToDomain(jobCategory)
   const candidateDomain = detectDomain(candidateText)
 
   if (jobDomain === 'unknown' || candidateDomain === 'unknown') return 0 // don't give free points for unknowns
@@ -822,14 +843,11 @@ function OpportunitiesInner() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredCanstart.map((opp) => {
-                const pct = computeCanstartMatch(seekerProfile, opp)
-                const fromResume = !!seekerProfile?.resume_text && seekerProfile.resume_text.length > 50
                 return (
                   <div key={opp.id} className="flex flex-col">
                     <OpportunityCard opportunity={opp} />
                     {seekerProfile && (
                       <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
-                        <MatchBar pct={pct} fromResume={fromResume} />
                         <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} workMode={opp.work_mode} jobCity={opp.city} jobCategory={(opp as unknown as { category?: string }).category || ''} />
                       </div>
                     )}
@@ -868,7 +886,6 @@ function OpportunitiesInner() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredExternal.map((job) => {
-                  const pct = computeExternalMatch(seekerProfile, job)
                   const expLevel = detectExperienceFromTitle(job.title)
                   const isApplied = appliedJobIds.has(job.id)
                   const isMarking = markingApplied === job.id
@@ -923,7 +940,6 @@ function OpportunitiesInner() {
                         ) : null}
                       </div>
 
-                      {seekerProfile && <MatchBar pct={pct} fromResume={!!seekerProfile.resume_text && seekerProfile.resume_text.length > 50} />}
                       {seekerProfile && (
                         <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={job.title} jobDescription={job.description || ''} workMode={job.work_mode} jobCity={job.city} jobCategory={job.category} />
                       )}
