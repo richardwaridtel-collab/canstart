@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 
 const BANNED_WORDS = [
   'leveraged','leverage','leveraging','utilized','utilize','utilizing',
@@ -45,7 +44,7 @@ Avoid buzzwords, corporate speak, and anything that sounds AI-generated.
 Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
 
 {
-  "summary": "3-4 sentence professional summary tailored to the job, human tone, first-person optional",
+  "summary": "3-4 sentence professional summary tailored to the job, human tone",
   "competencies": ["skill1", "skill2", ...],
   "competencyCount": 9,
   "experience": [
@@ -57,8 +56,8 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
       "bullets": ["bullet1", "bullet2"]
     }
   ],
-  "certifications": ["cert1", "cert2"] or null,
-  "tools": ["tool1", "tool2"] or null,
+  "certifications": ["cert1"] or null,
+  "tools": ["tool1"] or null,
   "education": [
     {
       "degree": "Degree Name",
@@ -68,8 +67,8 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
   ] or null
 }
 
-For competencies: choose exactly 9 or 12 skills that match keywords from the job description and the candidate's background.
-For certifications and tools: only include if they appear in the original resume. Otherwise set to null.
+For competencies: choose exactly 9 or 12 skills matching the job description and candidate background.
+For certifications and tools: only include if present in the original resume. Otherwise set to null.
 For education: only include if mentioned in the original resume. Otherwise set to null.`
 
 export async function POST(request: Request) {
@@ -108,28 +107,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Could not extract text from the resume. Please try a different file.' }, { status: 400 })
     }
 
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
-    const message = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: `${RESUME_PROMPT}
-
-=== CANDIDATE'S EXISTING RESUME ===
-${resumeText}
-
-=== JOB DESCRIPTION TO TAILOR FOR ===
-${jobDescription}
-
-Now create the tailored resume JSON following all rules above.`,
-        },
-      ],
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 4096,
+        temperature: 0.4,
+        messages: [
+          {
+            role: 'system',
+            content: RESUME_PROMPT,
+          },
+          {
+            role: 'user',
+            content: `=== CANDIDATE'S EXISTING RESUME ===\n${resumeText}\n\n=== JOB DESCRIPTION TO TAILOR FOR ===\n${jobDescription}\n\nNow create the tailored resume JSON following all rules above.`,
+          },
+        ],
+      }),
     })
 
-    const raw = message.content[0].type === 'text' ? message.content[0].text : ''
+    if (!groqRes.ok) {
+      const err = await groqRes.text()
+      console.error('Groq error:', err)
+      return NextResponse.json({ error: 'AI service error. Please try again.' }, { status: 500 })
+    }
+
+    const groqData = await groqRes.json()
+    const raw = groqData.choices?.[0]?.message?.content || ''
+
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) {
       return NextResponse.json({ error: 'Failed to generate resume. Please try again.' }, { status: 500 })
