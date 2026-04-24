@@ -240,8 +240,13 @@ function computeJobMatch(
       if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
     }
   })
-  // No default — if zero keywords are found in the job, score is 0
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 70) : 0
+  // Confidence factor: if fewer than 6 domain keywords are extracted from the job,
+  // we don't have enough signal. 2/2 matching shouldn't give 70/70 — it's unreliable.
+  // Full confidence (1.0) requires 10+ keywords. Below that, score is penalised.
+  const uniqueKeywordCount = keywords.length
+  const confidenceFactor = Math.min(1, uniqueKeywordCount / 10)
+  const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
+  const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
 
   // ── Factor 2: Industry alignment (30 pts) ────────────────────────────────────
   const industryScore = computeIndustryScore(candidateText, jobCategory)
@@ -275,7 +280,7 @@ const KNOWN_SKILLS = [
   'LinkedIn Ads','SEMrush','Ahrefs','Google Search Console','Google Tag Manager',
   // Web & General Development
   'SQL','Python','Java','JavaScript','TypeScript','React','HTML','CSS','PHP',
-  'R','VBA','Git','WordPress','Shopify','Node.js','Express','Next.js','Vue','Angular',
+  'R programming','VBA','Git','WordPress','Shopify','Node.js','Express','Next.js','Vue','Angular',
   'jQuery','REST API','GraphQL','JSON','XML','Bash','Shell scripting',
   // .NET Ecosystem
   '.NET','.NET Core','C#','ASP.NET','ASP.NET Core','Entity Framework','LINQ','WPF','WCF',
@@ -436,7 +441,9 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
   const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
   const weightedMatched = domainKeywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase())).reduce((s, { required }) => s + (required ? 2 : 1), 0)
   const weightedTotal = domainKeywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 70) : 0
+  const confidenceFactor = Math.min(1, domainKeywords.length / 10)
+  const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
+  const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
   const industryScore = computeIndustryScore(lower, jobCategory)
 
   // Application strategy
