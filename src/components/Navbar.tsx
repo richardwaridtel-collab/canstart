@@ -74,9 +74,14 @@ export default function Navbar() {
 
             {/* Seeker-specific */}
             {isSeeker && (
-              <Link href="/profile/setup" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
-                My Profile
-              </Link>
+              <>
+                <Link href="/resume-builder" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
+                  Resume Builder
+                </Link>
+                <Link href="/profile/setup" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
+                  My Profile
+                </Link>
+              </>
             )}
 
             {user ? (
@@ -131,9 +136,14 @@ export default function Navbar() {
             </>
           )}
           {isSeeker && (
-            <Link href="/profile/setup" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
-              My Profile
-            </Link>
+            <>
+              <Link href="/resume-builder" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                Resume Builder
+              </Link>
+              <Link href="/profile/setup" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                My Profile
+              </Link>
+            </>
           )}
           {user ? (
             <>

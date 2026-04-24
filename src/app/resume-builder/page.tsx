@@ -1,0 +1,471 @@
+'use client'
+
+import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+import {
+  Upload, FileText, Briefcase, CheckCircle, Download, Copy,
+  Loader2, ChevronDown, ChevronUp, Sparkles, AlertCircle, Printer
+} from 'lucide-react'
+
+type ResumeExperience = {
+  title: string
+  company: string
+  location: string
+  dates: string
+  bullets: string[]
+}
+
+type ResumeEducation = {
+  degree: string
+  institution: string
+  year: string
+}
+
+type GeneratedResume = {
+  summary: string
+  competencies: string[]
+  competencyCount: number
+  experience: ResumeExperience[]
+  certifications: string[] | null
+  tools: string[] | null
+  education: ResumeEducation[] | null
+}
+
+export default function ResumeBuilderPage() {
+  const router = useRouter()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const [authChecked, setAuthChecked] = useState(false)
+  const [resumeFile, setResumeFile] = useState<File | null>(null)
+  const [jobDescription, setJobDescription] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [resume, setResume] = useState<GeneratedResume | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [expandedRoles, setExpandedRoles] = useState<Record<number, boolean>>({})
+
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) { router.push('/auth/signin'); return }
+      const { data: profile } = await supabase.from('profiles').select('role').eq('user_id', data.user.id).single()
+      if (profile?.role === 'employer') { router.push('/dashboard'); return }
+      setAuthChecked(true)
+    })
+  }, [router])
+
+  const handleFile = (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'pdf' && ext !== 'docx') {
+      setError('Please upload a PDF or DOCX file.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('File must be under 5MB.')
+      return
+    }
+    setError('')
+    setResumeFile(file)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) handleFile(file)
+  }
+
+  const handleGenerate = async () => {
+    if (!resumeFile || !jobDescription.trim()) {
+      setError('Please upload your resume and paste the job description.')
+      return
+    }
+    setError('')
+    setLoading(true)
+    setResume(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('resume', resumeFile)
+      formData.append('jobDescription', jobDescription)
+
+      const res = await fetch('/api/resume-builder', { method: 'POST', body: formData })
+      const data = await res.json()
+
+      if (!res.ok || data.error) {
+        setError(data.error || 'Something went wrong. Please try again.')
+      } else {
+        setResume(data.resume)
+        // expand all roles by default
+        const expanded: Record<number, boolean> = {}
+        data.resume.experience.forEach((_: ResumeExperience, i: number) => { expanded[i] = true })
+        setExpandedRoles(expanded)
+        setTimeout(() => document.getElementById('resume-output')?.scrollIntoView({ behavior: 'smooth' }), 100)
+      }
+    } catch {
+      setError('Network error. Please try again.')
+    }
+
+    setLoading(false)
+  }
+
+  const getResumeText = () => {
+    if (!resume) return ''
+    const lines: string[] = []
+
+    lines.push('PROFESSIONAL SUMMARY')
+    lines.push('─'.repeat(60))
+    lines.push(resume.summary)
+    lines.push('')
+
+    lines.push('CORE COMPETENCIES')
+    lines.push('─'.repeat(60))
+    const cols = resume.competencies.length === 9 ? 3 : 4
+    for (let i = 0; i < resume.competencies.length; i += cols) {
+      lines.push(resume.competencies.slice(i, i + cols).join('  ·  '))
+    }
+    lines.push('')
+
+    lines.push('WORK EXPERIENCE')
+    lines.push('─'.repeat(60))
+    resume.experience.forEach((role) => {
+      lines.push(`${role.title} | ${role.company}`)
+      lines.push(`${role.location} | ${role.dates}`)
+      role.bullets.forEach((b) => lines.push(`• ${b}`))
+      lines.push('')
+    })
+
+    if (resume.certifications?.length) {
+      lines.push('PROFESSIONAL TRAINING & CERTIFICATIONS')
+      lines.push('─'.repeat(60))
+      resume.certifications.forEach((c) => lines.push(`• ${c}`))
+      lines.push('')
+    }
+
+    if (resume.tools?.length) {
+      lines.push('TOOLS PROFICIENCY')
+      lines.push('─'.repeat(60))
+      lines.push(resume.tools.join('  ·  '))
+      lines.push('')
+    }
+
+    if (resume.education?.length) {
+      lines.push('EDUCATION')
+      lines.push('─'.repeat(60))
+      resume.education.forEach((e) => lines.push(`${e.degree} — ${e.institution}${e.year ? ` (${e.year})` : ''}`))
+    }
+
+    return lines.join('\n')
+  }
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(getResumeText())
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleDownload = () => {
+    const blob = new Blob([getResumeText()], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'tailored-resume.txt'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handlePrint = () => window.print()
+
+  if (!authChecked) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  return (
+    <div className="bg-gray-50 min-h-screen pb-16">
+      {/* Header */}
+      <div className="bg-gradient-to-br from-red-600 to-red-700 text-white py-12 px-4">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 bg-white/20 px-4 py-1.5 rounded-full text-sm font-medium mb-4">
+            <Sparkles size={14} /> AI Resume Builder
+          </div>
+          <h1 className="text-3xl sm:text-4xl font-bold mb-3">Build Your Tailored Resume</h1>
+          <p className="text-red-100 text-lg max-w-2xl mx-auto">
+            Upload your resume and a job description — we'll create a tailored resume with
+            structured bullets, the right keywords, and a natural human tone.
+          </p>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+
+        {/* Input Section */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {/* Resume Upload */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Your Current Resume <span className="text-red-500">*</span>
+            </label>
+            <div
+              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
+                dragOver ? 'border-red-400 bg-red-50' :
+                resumeFile ? 'border-green-400 bg-green-50' :
+                'border-gray-300 bg-white hover:border-red-400 hover:bg-red-50'
+              }`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]) }}
+              />
+              {resumeFile ? (
+                <div className="space-y-1">
+                  <CheckCircle size={32} className="mx-auto text-green-500" />
+                  <p className="font-semibold text-green-700 text-sm">{resumeFile.name}</p>
+                  <p className="text-xs text-green-600">Click to replace</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Upload size={32} className="mx-auto text-gray-400" />
+                  <p className="text-sm font-medium text-gray-600">Drop your resume here or click to browse</p>
+                  <p className="text-xs text-gray-400">PDF or DOCX · Max 5MB</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Job Description */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Job Description <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={jobDescription}
+              onChange={(e) => setJobDescription(e.target.value)}
+              placeholder="Paste the full job posting here — including responsibilities, requirements, and any keywords..."
+              rows={8}
+              className="w-full px-4 py-3 border border-gray-300 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none bg-white"
+            />
+            <p className="text-xs text-gray-400 mt-1">{jobDescription.length} characters · Paste the full posting for best results</p>
+          </div>
+        </div>
+
+        {/* What we follow */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
+          <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+            <FileText size={16} className="text-red-500" /> What this builder follows
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-600">
+            {[
+              'No AI-generated buzzwords — natural human language only',
+              'Each bullet uses CAR or STAR method (mixed)',
+              'Every bullet is 18–20 words',
+              'Current role: 6 bullets · Next 2 roles: 4 · Older roles: 3',
+              'Keywords tailored to your specific job description',
+              'Structure: Summary → Competencies → Experience → Certs → Tools → Education',
+            ].map((item) => (
+              <div key={item} className="flex items-start gap-2">
+                <CheckCircle size={14} className="text-green-500 flex-shrink-0 mt-0.5" />
+                <span>{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+            <AlertCircle size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+
+        {/* Generate Button */}
+        <button
+          onClick={handleGenerate}
+          disabled={loading || !resumeFile || !jobDescription.trim()}
+          className="w-full bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-3 text-lg transition-colors"
+        >
+          {loading ? (
+            <>
+              <Loader2 size={22} className="animate-spin" />
+              Building your tailored resume… this takes about 20 seconds
+            </>
+          ) : (
+            <>
+              <Sparkles size={22} />
+              Build My Tailored Resume
+            </>
+          )}
+        </button>
+
+        {/* Resume Output */}
+        {resume && (
+          <div id="resume-output" className="mt-10">
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <CheckCircle size={20} className="text-green-500" /> Your Tailored Resume
+              </h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                >
+                  {copied ? <CheckCircle size={15} className="text-green-500" /> : <Copy size={15} />}
+                  {copied ? 'Copied!' : 'Copy Text'}
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                >
+                  <Download size={15} /> Download .txt
+                </button>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded-xl transition-colors"
+                >
+                  <Printer size={15} /> Print / PDF
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden print:shadow-none print:border-none" id="resume-print">
+
+              {/* Professional Summary */}
+              <section className="p-6 border-b border-gray-100">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-3">Professional Summary</h3>
+                <p className="text-gray-800 leading-relaxed">{resume.summary}</p>
+              </section>
+
+              {/* Core Competencies */}
+              <section className="p-6 border-b border-gray-100">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-3">
+                  Core Competencies
+                  <span className="ml-2 text-gray-400 font-normal normal-case tracking-normal text-xs">
+                    ({resume.competencies.length} skills)
+                  </span>
+                </h3>
+                <div className={`grid gap-2 ${resume.competencies.length === 9 ? 'grid-cols-3' : 'grid-cols-4'}`}>
+                  {resume.competencies.map((skill, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm text-gray-700">
+                      <span className="w-1.5 h-1.5 bg-red-500 rounded-full flex-shrink-0" />
+                      {skill}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* Work Experience */}
+              <section className="p-6 border-b border-gray-100">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-4">Work Experience</h3>
+                <div className="space-y-5">
+                  {resume.experience.map((role, i) => (
+                    <div key={i} className="border border-gray-100 rounded-xl overflow-hidden">
+                      <div
+                        className="flex items-center justify-between p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
+                        onClick={() => setExpandedRoles((prev) => ({ ...prev, [i]: !prev[i] }))}
+                      >
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Briefcase size={14} className="text-red-500" />
+                            <span className="font-bold text-gray-900">{role.title}</span>
+                            {i === 0 && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Current</span>}
+                          </div>
+                          <p className="text-sm text-gray-500 mt-0.5 ml-5">{role.company} · {role.location} · {role.dates}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">{role.bullets.length} bullets</span>
+                          {expandedRoles[i] ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                        </div>
+                      </div>
+                      {expandedRoles[i] && (
+                        <ul className="p-4 space-y-2.5">
+                          {role.bullets.map((bullet, j) => (
+                            <li key={j} className="flex items-start gap-2.5 text-sm text-gray-700 leading-relaxed">
+                              <span className="w-1.5 h-1.5 bg-red-400 rounded-full flex-shrink-0 mt-1.5" />
+                              <span>{bullet}</span>
+                              <span className="ml-auto text-xs text-gray-300 flex-shrink-0 self-start mt-0.5">
+                                {bullet.split(' ').length}w
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {/* Certifications */}
+              {resume.certifications && resume.certifications.length > 0 && (
+                <section className="p-6 border-b border-gray-100">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-3">Professional Training &amp; Certifications</h3>
+                  <ul className="space-y-1.5">
+                    {resume.certifications.map((cert, i) => (
+                      <li key={i} className="flex items-center gap-2 text-sm text-gray-700">
+                        <span className="w-1.5 h-1.5 bg-red-500 rounded-full flex-shrink-0" />
+                        {cert}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+
+              {/* Tools */}
+              {resume.tools && resume.tools.length > 0 && (
+                <section className="p-6 border-b border-gray-100">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-3">Tools Proficiency</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {resume.tools.map((tool, i) => (
+                      <span key={i} className="bg-gray-100 text-gray-700 text-sm px-3 py-1 rounded-full">{tool}</span>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Education */}
+              {resume.education && resume.education.length > 0 && (
+                <section className="p-6">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-red-600 mb-3">Education</h3>
+                  <div className="space-y-2">
+                    {resume.education.map((edu, i) => (
+                      <div key={i} className="text-sm text-gray-700">
+                        <span className="font-semibold">{edu.degree}</span>
+                        <span className="text-gray-500"> — {edu.institution}{edu.year ? ` (${edu.year})` : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+
+            {/* Footer tip */}
+            <div className="mt-4 flex items-start gap-2 text-xs text-gray-400">
+              <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
+              <p>
+                Review every bullet before submitting. The word count is shown beside each bullet (aim for 18–20).
+                Use "Print / PDF" to save a clean version, or "Copy Text" to paste into Word.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @media print {
+          body > *:not(#resume-print) { display: none !important; }
+          #resume-print { display: block !important; }
+          .print\\:hidden { display: none !important; }
+        }
+      `}</style>
+    </div>
+  )
+}
