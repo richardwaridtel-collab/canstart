@@ -47,6 +47,11 @@ WHAT THESE EXAMPLES HAVE IN COMMON (follow all of these):
 5. Bullets are 15–22 words. Say what needs to be said and stop. Never pad for length.
 6. Language is plain and direct — a real person describing real work, not marketing copy
 7. NO buzzwords, NO vague claims, NO AI-sounding phrases
+8. PRESERVE REAL NUMBERS FROM THE ORIGINAL RESUME — this is critical:
+   - If the candidate's original resume contains specific numbers, percentages, dollar amounts, counts, team sizes, timelines, or any other metric they actually achieved, carry those exact figures into the tailored resume wherever the bullet is relevant to the job.
+   - Never drop a real metric just to rewrite a bullet more cleanly. The number is the proof — keep it.
+   - Never invent or estimate a number that was not in the original resume. If a bullet has no metric in the original, do not fabricate one.
+   - If a bullet is relevant to the job, use the real number. If the bullet is not relevant to the job at all, you may omit it — but never swap a real number for a vague claim.
 
 === BANNED WORDS — NEVER USE THESE ===
 ${BANNED_WORDS.join(', ')}
