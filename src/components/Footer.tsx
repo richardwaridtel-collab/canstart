@@ -27,6 +27,7 @@ export default function Footer() {
               <li><Link href="/opportunities" className="hover:text-white transition-colors">Browse Opportunities</Link></li>
               <li><Link href="/auth/signup?role=seeker" className="hover:text-white transition-colors">Create Profile</Link></li>
               <li><Link href="/dashboard" className="hover:text-white transition-colors">My Applications</Link></li>
+              <li><Link href="/profile/setup" className="hover:text-white transition-colors">Edit Profile</Link></li>
             </ul>
           </div>
 
@@ -34,8 +35,9 @@ export default function Footer() {
             <h3 className="text-white font-semibold mb-4">For Businesses</h3>
             <ul className="space-y-2 text-sm">
               <li><Link href="/candidates" className="hover:text-white transition-colors">Find Candidates</Link></li>
-              <li><Link href="/auth/signup?role=employer" className="hover:text-white transition-colors">Post Opportunity</Link></li>
+              <li><Link href="/post-opportunity" className="hover:text-white transition-colors">Post Opportunity</Link></li>
               <li><Link href="/dashboard" className="hover:text-white transition-colors">Manage Listings</Link></li>
+              <li><Link href="/auth/signup?role=employer" className="hover:text-white transition-colors">Register Business</Link></li>
             </ul>
           </div>
         </div>

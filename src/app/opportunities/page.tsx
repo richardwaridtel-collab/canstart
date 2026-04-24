@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
@@ -369,7 +369,16 @@ function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
 }
 
 export default function OpportunitiesPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin" /></div>}>
+      <OpportunitiesInner />
+    </Suspense>
+  )
+}
+
+function OpportunitiesInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [seekerProfile, setSeekerProfile] = useState<SeekerProfile | null>(null)
   const [canstartJobs, setCanstartJobs] = useState<Opportunity[]>([])
@@ -384,6 +393,11 @@ export default function OpportunitiesPage() {
   const [experience, setExperience] = useState('Any Level')
   const [activeTab, setActiveTab] = useState<'canstart' | 'external'>('external')
   const [loading, setLoading] = useState(false)
+  // Read ?city= from URL (e.g. from home page city links)
+  useEffect(() => {
+    const urlCity = searchParams.get('city')
+    if (urlCity && CITIES.includes(urlCity)) setCity(urlCity)
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
   const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set())

@@ -8,9 +8,6 @@ import type { Opportunity } from '@/lib/types'
 import { MapPin, Clock, Wifi, Building2, ArrowLeft, CheckCircle, Send, Briefcase, Shield } from 'lucide-react'
 import { track } from '@vercel/analytics'
 
-const DEMO: Record<string, Opportunity> = {
-  '1': { id: '1', employer_id: 'e1', employer_name: 'Tech Ottawa', company_name: 'Tech Ottawa', title: 'Digital Marketing Volunteer', description: 'Help our local tech organization grow its social media presence. You will manage Instagram, LinkedIn, and Twitter accounts, create content calendars, and analyze engagement metrics. This is a hands-on role where you will work closely with our communications team and gain real Canadian work experience in digital marketing.\n\nResponsibilities:\n• Manage and grow our social media accounts (Instagram, LinkedIn, Twitter)\n• Create engaging content aligned with our brand voice\n• Analyze performance metrics and provide monthly reports\n• Assist with email newsletter campaigns\n• Support event promotion and community engagement\n\nWhat you will gain:\n• Verified Canadian work experience reference\n• LinkedIn recommendation from our Communications Director\n• Portfolio-worthy projects and case studies\n• Professional network in Ottawa\'s tech community', type: 'volunteer', city: 'Ottawa', work_mode: 'hybrid', skills_required: ['Social Media', 'Content Creation', 'Canva', 'Analytics', 'Email Marketing'], duration: '3 months', status: 'open', created_at: new Date().toISOString() },
-}
 
 export default function OpportunityDetailPage() {
   const params = useParams()
@@ -23,10 +20,20 @@ export default function OpportunityDetailPage() {
   const [coverNote, setCoverNote] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [user, setUser] = useState<{ id: string } | null>(null)
+  const [userRole, setUserRole] = useState<string | null>(null)
 
   useEffect(() => {
     loadOpportunity()
-    supabase.auth.getUser().then(({ data }) => setUser(data.user))
+    supabase.auth.getUser().then(async ({ data }) => {
+      setUser(data.user)
+      if (data.user) {
+        const { data: profile } = await supabase.from('profiles').select('role').eq('user_id', data.user.id).single()
+        setUserRole(profile?.role || null)
+        // Check if already applied
+        const { data: existing } = await supabase.from('applications').select('id').eq('opportunity_id', id).eq('seeker_id', data.user.id).single()
+        if (existing) setApplied(true)
+      }
+    })
   }, [id])
 
   const loadOpportunity = async () => {
@@ -43,7 +50,7 @@ export default function OpportunityDetailPage() {
         employer_name: (data.employer_profiles as { company_name?: string } | null)?.company_name || 'Company',
       })
     } else {
-      setOpportunity(DEMO[id] || null)
+      setOpportunity(null)
     }
     setLoading(false)
   }
@@ -143,7 +150,13 @@ export default function OpportunityDetailPage() {
           {/* Sidebar / Apply */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-24">
-              {applied ? (
+              {userRole === 'employer' ? (
+                <div className="text-center py-4 text-gray-500 text-sm">
+                  <Briefcase size={32} className="mx-auto text-gray-300 mb-2" />
+                  Employer accounts cannot apply to opportunities.<br />
+                  <Link href="/candidates" className="text-red-600 hover:underline text-sm mt-2 inline-block">Find candidates instead →</Link>
+                </div>
+              ) : applied ? (
                 <div className="text-center py-4">
                   <CheckCircle size={40} className="text-green-500 mx-auto mb-3" />
                   <h3 className="font-semibold text-gray-900 mb-2">Application Sent!</h3>

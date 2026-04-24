@@ -227,7 +227,7 @@ export default function PostOpportunityPage() {
           </div>
 
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-700">
-            <strong>Review process:</strong> Your opportunity will be reviewed within 24 hours to ensure it meets our community standards. Posting is free.
+            <strong>Free to post.</strong> Your opportunity goes live immediately and is visible to all candidates on CanStart. Make sure your description is clear and accurate.
           </div>
 
           <button

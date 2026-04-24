@@ -268,8 +268,8 @@ export default function DashboardPage() {
                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${job.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                           {job.status}
                         </span>
-                        <Link href={`/opportunities/${job.id}`} className="text-gray-400 hover:text-red-600 transition-colors">
-                          <Eye size={16} />
+                        <Link href={`/applications/${job.id}`} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1">
+                          <Eye size={14} /> Applicants
                         </Link>
                       </div>
                     </div>

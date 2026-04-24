@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink, FileText, Download, ChevronDown } from 'lucide-react'
 
@@ -75,6 +76,7 @@ export default function CandidatesPage() {
   const [search, setSearch] = useState('')
   const [city, setCity] = useState('All Cities')
   const [isEmployer, setIsEmployer] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
   const [postedJobs, setPostedJobs] = useState<PostedOpportunity[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string>('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -84,8 +86,7 @@ export default function CandidatesPage() {
 
   useEffect(() => {
     checkEmployer()
-    loadCandidates()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let result = [...candidates]
@@ -97,13 +98,14 @@ export default function CandidatesPage() {
 
   const checkEmployer = async () => {
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { router.push('/auth/signin'); return }
     const { data: profile } = await supabase.from('profiles').select('role').eq('user_id', user.id).single()
-    if (profile?.role === 'employer') {
-      setIsEmployer(true)
-      const { data: jobs } = await supabase.from('opportunities').select('id, title, skills_required, work_mode, city').eq('employer_id', user.id).eq('status', 'open')
-      if (jobs) setPostedJobs(jobs as PostedOpportunity[])
-    }
+    if (profile?.role !== 'employer') { router.push('/dashboard'); return }
+    setIsEmployer(true)
+    setAuthChecked(true)
+    const { data: jobs } = await supabase.from('opportunities').select('id, title, skills_required, work_mode, city').eq('employer_id', user.id).eq('status', 'open')
+    if (jobs) setPostedJobs(jobs as PostedOpportunity[])
+    loadCandidates()
   }
 
   const loadCandidates = async () => {
@@ -139,6 +141,12 @@ export default function CandidatesPage() {
     if (error || !data?.signedUrl) { alert('Could not generate download link. Please try again.'); return }
     window.open(data.signedUrl, '_blank')
   }
+
+  if (!authChecked) return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="w-8 h-8 border-4 border-gray-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">

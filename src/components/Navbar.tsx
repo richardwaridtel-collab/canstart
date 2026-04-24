@@ -2,27 +2,43 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
-import { Menu, X, MapPin } from 'lucide-react'
+import { Menu, X, MapPin, PlusCircle } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+
+const ADMIN_EMAILS = ['richard.waridtel@gmail.com']
 
 export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
-  const [user, setUser] = useState<{ email?: string } | null>(null)
+  const [user, setUser] = useState<{ email?: string; id?: string } | null>(null)
+  const [role, setRole] = useState<string | null>(null)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user)
+      if (data.user) fetchRole(data.user.id)
     })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
+      if (session?.user) fetchRole(session.user.id)
+      else setRole(null)
     })
     return () => listener.subscription.unsubscribe()
   }, [])
 
+  const fetchRole = async (userId: string) => {
+    const { data } = await supabase.from('profiles').select('role').eq('user_id', userId).single()
+    setRole(data?.role ?? null)
+  }
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
+    setRole(null)
     window.location.href = '/'
   }
+
+  const isAdmin = ADMIN_EMAILS.includes(user?.email || '')
+  const isEmployer = role === 'employer'
+  const isSeeker = role === 'seeker'
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
@@ -37,27 +53,43 @@ export default function Navbar() {
             </span>
           </Link>
 
+          {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-6">
+            {/* Always visible */}
             <Link href="/opportunities" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
-              Browse Opportunities
+              Browse Jobs
             </Link>
-            <Link href="/candidates" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
-              Find Candidates
-            </Link>
+
+            {/* Employer-specific */}
+            {isEmployer && (
+              <>
+                <Link href="/candidates" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
+                  Find Candidates
+                </Link>
+                <Link href="/post-opportunity" className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
+                  <PlusCircle size={15} /> Post Opportunity
+                </Link>
+              </>
+            )}
+
+            {/* Seeker-specific */}
+            {isSeeker && (
+              <Link href="/profile/setup" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
+                My Profile
+              </Link>
+            )}
+
             {user ? (
               <>
                 <Link href="/dashboard" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Dashboard
                 </Link>
-                {user.email === 'richard.waridtel@gmail.com' && (
-                  <Link href="/admin" className="text-xs font-semibold bg-gray-800 text-white px-3 py-1 rounded-lg hover:bg-gray-700 transition-colors">
+                {isAdmin && (
+                  <Link href="/admin" className="text-xs font-semibold bg-gray-800 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors">
                     Admin
                   </Link>
                 )}
-                <button
-                  onClick={handleSignOut}
-                  className="text-sm text-gray-500 hover:text-red-600 transition-colors"
-                >
+                <button onClick={handleSignOut} className="text-sm text-gray-500 hover:text-red-600 transition-colors">
                   Sign Out
                 </button>
               </>
@@ -66,10 +98,7 @@ export default function Navbar() {
                 <Link href="/auth/signin" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Sign In
                 </Link>
-                <Link
-                  href="/auth/signup"
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-                >
+                <Link href="/auth/signup" className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors">
                   Get Started
                 </Link>
               </>
@@ -85,20 +114,33 @@ export default function Navbar() {
         </div>
       </div>
 
+      {/* Mobile menu */}
       {menuOpen && (
-        <div className="md:hidden bg-white border-t border-gray-100 px-4 py-4 space-y-3">
+        <div className="md:hidden bg-white border-t border-gray-100 px-4 py-4 space-y-2">
           <Link href="/opportunities" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
-            Browse Opportunities
+            Browse Jobs
           </Link>
-          <Link href="/candidates" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
-            Find Candidates
-          </Link>
+          {isEmployer && (
+            <>
+              <Link href="/candidates" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                Find Candidates
+              </Link>
+              <Link href="/post-opportunity" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                Post Opportunity
+              </Link>
+            </>
+          )}
+          {isSeeker && (
+            <Link href="/profile/setup" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+              My Profile
+            </Link>
+          )}
           {user ? (
             <>
               <Link href="/dashboard" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Dashboard
               </Link>
-              {user.email === 'richard.waridtel@gmail.com' && (
+              {isAdmin && (
                 <Link href="/admin" className="block text-gray-700 font-semibold py-2" onClick={() => setMenuOpen(false)}>
                   ⚙ Admin
                 </Link>
