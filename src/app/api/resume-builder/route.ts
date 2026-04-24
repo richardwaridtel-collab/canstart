@@ -133,40 +133,42 @@ For certifications and tools: only include if present in the original resume. Ot
 For education: only include if mentioned in the original resume. Otherwise set to null.
 For scores — BE STRICT AND HONEST. Do not inflate. A generous score is misleading and harmful.
 
-RESUME RATING (out of 10) — add up these points honestly:
+RESUME RATING (out of 10) — rate the CANDIDATE'S UNDERLYING PROFILE STRENGTH for this specific role.
+IMPORTANT: You are NOT rating your own writing quality. You are rating how strong the candidate actually is for this job based on what they brought to the table. Be honest and strict.
 
-Bullet specificity (0–3 pts):
-  3 = every bullet has a specific number, metric, dollar amount, or count
-  2 = most bullets (70%+) have specific numbers
-  1 = fewer than half have numbers
-  0 = vague bullets with no metrics at all
+Real achievements from the original resume (0–3 pts):
+  Look at the candidate's ORIGINAL resume. Did they have real measurable results — specific numbers, dollar amounts, percentages, counts?
+  3 = strong track record of measurable results across most roles (majority of bullets had real numbers in the original)
+  2 = some measurable results but inconsistent — maybe half the roles had metrics
+  1 = few metrics — mostly responsibility-based history, little evidence of outcomes
+  0 = no real achievements — original resume read like a job description with no results at all
 
-Writing quality (0–2 pts):
-  2 = all bullets start with a direct action verb, zero buzzwords, clean language throughout
-  1 = mostly good but some filler phrases, weak verbs, or buzzwords crept in
-  0 = multiple buzzwords, passive voice, AI-sounding phrases
+Experience relevance (0–3 pts):
+  How directly does the candidate's actual work history match the core function of this job?
+  3 = the candidate has directly done this type of work, at similar scope, in a similar context
+  2 = mostly relevant with clear transferable experience — some gaps but core function matches
+  1 = partial overlap — some related experience but significant gaps in the core requirement
+  0 = largely unrelated background — the role requires experience this candidate simply doesn't have
 
-Bullet structure (0–2 pts):
-  2 = every bullet makes one clear claim: what was done + what resulted
-  1 = some bullets are vague or don't show a result
-  0 = bullets read like job descriptions, not accomplishments
+Seniority and scope fit (0–2 pts):
+  Does the candidate's level, years of experience, and scope of past roles match what this job requires?
+  2 = clear match — years of experience, seniority, and team/budget scope align well with the role
+  1 = slight mismatch — candidate is moderately over or under-qualified, or scope is noticeably different
+  0 = clear mismatch — significant gap in seniority, experience level, or scale
 
-Job relevance (0–2 pts):
-  2 = the tailored content clearly connects to what the job is asking for
-  1 = partially relevant but some bullets feel generic
-  0 = most bullets don't connect to the job at all
+Required skills coverage (0–2 pts):
+  How many of the specific skills, tools, and qualifications the job requires does the candidate actually have?
+  2 = covers 75%+ of the job's required skills and qualifications
+  1 = covers 40–74% — meaningful coverage but notable gaps
+  0 = covers less than 40% — major required skills are absent
 
-Summary quality (0–1 pt):
-  1 = honest, specific, conversational, clearly tailored to the role
-  0 = generic, could apply to anyone, sounds like a template
-
-SCORE BENCHMARKS (use these to calibrate):
-  9–10 = exceptional resume, every bullet sharp, every number present, perfectly tailored. Rare.
-  7–8  = strong resume with good metrics and clear writing. Minor issues only.
-  5–6  = decent resume but missing numbers in several bullets or some weak writing.
-  3–4  = weak resume: vague bullets, few or no metrics, poorly tailored.
-  1–2  = very poor: generic language, no metrics, doesn't match the job.
-  Most resumes should honestly score between 5 and 7. Be strict.
+SCORE BENCHMARKS (calibrate against these):
+  9–10 = exceptional candidate: strong measurable results, directly relevant experience, perfect seniority fit, covers nearly all required skills. Very rare.
+  7–8  = strong candidate: solid track record with some metrics, relevant experience, good fit. Ready to apply.
+  5–6  = decent candidate: some relevant experience and some metrics, but gaps exist. Application is worth trying.
+  3–4  = weak fit: limited relevant experience, few real achievements, or significant skills gaps.
+  1–2  = poor fit: background does not match the role in any meaningful way.
+  Most candidates will honestly fall between 4 and 7. Only award 8+ when the fit is genuinely strong across all four categories. Be strict.
 
 JOB MATCH PERCENTAGE (0–100) — calculate honestly based on these four factors:
 
@@ -198,7 +200,7 @@ MATCH BENCHMARKS:
   Below 40% = weak match, major requirements missing
   Most matches should honestly fall between 45% and 70%. Only give 80%+ if the fit is genuinely strong.
 
-- ratingReasons: 2–3 short specific sentences saying exactly what the resume does well (refer to actual bullets or sections).
+- ratingReasons: 2–3 short specific sentences explaining what drives this candidate's rating — refer to their actual background, real achievements, and how well their experience fits this role. Do not praise the writing or formatting (you wrote it). Focus on what the candidate actually brings (e.g. "Has 8 years of directly relevant project management experience with measurable outcomes across multiple roles" or "Original resume lacked specific metrics, which limits the evidence of real impact").
 
 - matchGaps: Explain specifically why this resume is NOT scoring above 90% match. List 2–4 concrete experience gaps — things the job description requires that the candidate's background does not clearly demonstrate. Be direct and specific (e.g. "No direct PR or media relations experience, which is a core requirement of this role" or "Has not managed paid social ad budgets, which the JD lists as required"). These should be real gaps based on comparing the resume to the JD — not generic observations. If the match is genuinely above 90%, set to [].
 
