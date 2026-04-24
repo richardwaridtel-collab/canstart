@@ -117,11 +117,75 @@ For contact: extract name, city, province, phone, email, and LinkedIn from the o
 For competencies: choose exactly 9 or 12 skills matching the job description and candidate background.
 For certifications and tools: only include if present in the original resume. Otherwise set to null.
 For education: only include if mentioned in the original resume. Otherwise set to null.
-For scores:
-- resumeRating: rate the overall quality of the tailored resume out of 10. Consider bullet strength, specificity, numbers used, writing quality, and how well it presents the candidate.
-- matchPercentage: percentage match between the tailored resume and the job description (0-100). Consider keyword alignment, required skills covered, experience level match, and role relevance.
-- ratingReasons: 2-3 short sentences explaining what makes the resume strong (what scored well).
-- matchGaps: 1-3 short phrases identifying what's missing or weak in the match (skills/experience in the job description not well covered by the resume). If match is above 85%, set to [].`
+For scores — BE STRICT AND HONEST. Do not inflate. A generous score is misleading and harmful.
+
+RESUME RATING (out of 10) — add up these points honestly:
+
+Bullet specificity (0–3 pts):
+  3 = every bullet has a specific number, metric, dollar amount, or count
+  2 = most bullets (70%+) have specific numbers
+  1 = fewer than half have numbers
+  0 = vague bullets with no metrics at all
+
+Writing quality (0–2 pts):
+  2 = all bullets start with a direct action verb, zero buzzwords, clean language throughout
+  1 = mostly good but some filler phrases, weak verbs, or buzzwords crept in
+  0 = multiple buzzwords, passive voice, AI-sounding phrases
+
+Bullet structure (0–2 pts):
+  2 = every bullet makes one clear claim: what was done + what resulted
+  1 = some bullets are vague or don't show a result
+  0 = bullets read like job descriptions, not accomplishments
+
+Job relevance (0–2 pts):
+  2 = the tailored content clearly connects to what the job is asking for
+  1 = partially relevant but some bullets feel generic
+  0 = most bullets don't connect to the job at all
+
+Summary quality (0–1 pt):
+  1 = honest, specific, conversational, clearly tailored to the role
+  0 = generic, could apply to anyone, sounds like a template
+
+SCORE BENCHMARKS (use these to calibrate):
+  9–10 = exceptional resume, every bullet sharp, every number present, perfectly tailored. Rare.
+  7–8  = strong resume with good metrics and clear writing. Minor issues only.
+  5–6  = decent resume but missing numbers in several bullets or some weak writing.
+  3–4  = weak resume: vague bullets, few or no metrics, poorly tailored.
+  1–2  = very poor: generic language, no metrics, doesn't match the job.
+  Most resumes should honestly score between 5 and 7. Be strict.
+
+JOB MATCH PERCENTAGE (0–100) — calculate honestly based on these four factors:
+
+Required skills covered (worth 40%):
+  Count how many required skills/qualifications from the job description are present in the resume.
+  Score = (skills matched / total required skills) × 40
+
+Keyword alignment (worth 25%):
+  Count how many specific keywords, tools, technologies, or phrases from the job description appear in the resume.
+  Score = (keywords matched / total JD keywords) × 25
+
+Experience level match (worth 20%):
+  20 = years of experience and seniority level match the role exactly
+  14 = candidate is slightly over or under-qualified
+  8  = noticeable gap in seniority or years of experience
+  0  = significant mismatch (e.g. senior role, junior candidate)
+
+Industry/domain relevance (worth 15%):
+  15 = same industry or domain
+  10 = related industry with transferable experience
+  5  = different industry but some overlap
+  0  = completely different background
+
+MATCH BENCHMARKS:
+  85–100% = near-perfect fit, candidate is very well suited
+  70–84%  = strong match, most requirements covered
+  55–69%  = decent match, some gaps exist
+  40–54%  = partial match, significant gaps
+  Below 40% = weak match, major requirements missing
+  Most matches should honestly fall between 45% and 70%. Only give 80%+ if the fit is genuinely strong.
+
+- ratingReasons: 2–3 short specific sentences saying exactly what the resume does well (refer to actual bullets or sections).
+- matchGaps: list 1–3 specific skills, tools, or experiences from the job description that are missing or underrepresented in the resume. Be specific (e.g. "No mention of Salesforce CRM which is listed as required"). If match is genuinely above 85%, set to [].`
 
 export async function POST(request: Request) {
   try {
