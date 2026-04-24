@@ -553,8 +553,8 @@ export default function ResumeBuilderPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-600">
             {[
               'No AI-generated buzzwords — natural human language only',
-              'Each bullet uses CAR or STAR method (mixed)',
-              'Every bullet is 18–20 words',
+              '3 bullet patterns: action+result, result+how, action+impact',
+              'Every bullet is 15–22 words — concise, no padding',
               'Current role: 6 bullets · Next 2 roles: 4 · Older roles: 3',
               'Keywords tailored to your specific job description',
               'Structure: Summary → Competencies → Experience → Certs → Tools → Education',
@@ -831,7 +831,7 @@ export default function ResumeBuilderPage() {
             <div className="mt-4 flex items-start gap-2 text-xs text-gray-400">
               <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
               <p>
-                Review every bullet before submitting. The word count is shown beside each bullet (aim for 18–20).
+                Review every bullet before submitting. The word count is shown beside each bullet (aim for 15–22).
                 Use "Print / PDF" to save a clean version, or "Copy Text" to paste into Word.
               </p>
             </div>
