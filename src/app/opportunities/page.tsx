@@ -157,16 +157,13 @@ function detectSeekerLevel(resumeText: string): string {
 }
 
 /**
- * Unified 5-factor match score
- * Factor 1 — Domain-specific keyword coverage  (55 pts): soft skills excluded
- * Factor 2 — Domain / industry alignment       (20 pts): heavy cross-domain penalty
- * Factor 3 — Experience level alignment        (15 pts)
- * Factor 4 — Work mode fit                     ( 7 pts)
- * Factor 5 — Location fit                      ( 3 pts)
- * Total: 100 pts
+ * 3-factor match score — purely based on candidate experience vs job requirements.
+ * Location and work mode are NOT considered (candidate can relocate / be flexible).
  *
- * A cross-domain candidate (e.g. marketer vs tech job) will score max ~25
- * even with perfect location/mode/experience — which is correct.
+ * Factor 1 — Domain-specific keyword coverage  (60 pts): required skills weighted 2×
+ * Factor 2 — Domain / industry alignment       (25 pts): heavy cross-domain penalty
+ * Factor 3 — Experience level alignment        (15 pts): years / seniority fit
+ * Total: 100 pts
  */
 function computeJobMatch(
   seeker: SeekerProfile | null,
@@ -177,13 +174,14 @@ function computeJobMatch(
   jobCity: string,
 ): number {
   if (!seeker) return 0
+  void workMode; void jobCity // not used — location/mode excluded from scoring
 
   const resumeText = seeker.resume_text?.toLowerCase() || ''
   const hasResume = resumeText.length > 50
   const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
   const jobText = (jobTitle + ' ' + jobDescription).toLowerCase()
 
-  // ── Factor 1: Domain-specific keyword coverage (55 pts) ──────────────────────
+  // ── Factor 1: Domain-specific keyword coverage (60 pts) ──────────────────────
   const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
     .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
   let weightedMatched = 0
@@ -199,10 +197,10 @@ function computeJobMatch(
       if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
     }
   })
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 55) : 20
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 60) : 20
 
-  // ── Factor 2: Domain / industry alignment (20 pts) ───────────────────────────
-  const domainScore = computeDomainScore(candidateText, jobText)
+  // ── Factor 2: Domain / industry alignment (25 pts) ───────────────────────────
+  const domainScore = Math.round(computeDomainScore(candidateText, jobText) * (25 / 20))
 
   // ── Factor 3: Experience level alignment (15 pts) ────────────────────────────
   const jobLevel = detectExperienceFromTitle(jobTitle)
@@ -211,13 +209,7 @@ function computeJobMatch(
   const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
   const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
 
-  // ── Factor 4: Work mode fit (7 pts) ──────────────────────────────────────────
-  const modeScore = (seeker.work_preference === 'any' || seeker.work_preference === workMode || workMode === 'hybrid') ? 7 : 2
-
-  // ── Factor 5: Location fit (3 pts) ───────────────────────────────────────────
-  const cityScore = seeker.city && jobCity && seeker.city.toLowerCase() === jobCity.toLowerCase() ? 3 : 0
-
-  return Math.round(Math.min(100, keywordScore + domainScore + levelScore + modeScore + cityScore))
+  return Math.round(Math.min(100, keywordScore + domainScore + levelScore))
 }
 
 function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): number {
@@ -406,15 +398,13 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
   const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
   const weightedMatched = domainKeywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase())).reduce((s, { required }) => s + (required ? 2 : 1), 0)
   const weightedTotal = domainKeywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 55) : 20
-  const domainScore = computeDomainScore(lower, (jobTitle + ' ' + jobDescription).toLowerCase())
+  const keywordScore = weightedTotal > 0 ? Math.round((weightedMatched / weightedTotal) * 60) : 20
+  const domainScore = Math.round(computeDomainScore(lower, (jobTitle + ' ' + jobDescription).toLowerCase()) * (25 / 20))
   const jobLevel = detectExperienceFromTitle(jobTitle)
   const seekerLevel = detectSeekerLevel(resumeText)
   const levels = ['Entry Level', 'Mid Level', 'Senior Level']
   const diff = Math.abs(levels.indexOf(jobLevel) - levels.indexOf(seekerLevel))
   const levelScore = diff === 0 ? 15 : diff === 1 ? 9 : 3
-  const modeScore = seekerProfile ? ((seekerProfile.work_preference === 'any' || seekerProfile.work_preference === workMode || workMode === 'hybrid') ? 7 : 2) : 0
-  const cityScore = seekerProfile?.city && jobCity && seekerProfile.city.toLowerCase() === jobCity.toLowerCase() ? 3 : 0
 
   // Application strategy
   const strategy = overallPct >= 75
@@ -448,12 +438,11 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
         </div>
 
         {/* Score breakdown */}
-        <div className="grid grid-cols-2 gap-1.5 mb-2">
+        <div className="grid grid-cols-3 gap-1.5 mb-2">
           {[
-            { label: 'Keywords & Skills', score: keywordScore, max: 55 },
-            { label: 'Industry Alignment', score: domainScore, max: 20 },
-            { label: 'Experience Level', score: levelScore, max: 15 },
-            { label: 'Mode & Location', score: modeScore + cityScore, max: 10 },
+            { label: 'Skills Match', score: keywordScore, max: 60 },
+            { label: 'Industry Fit', score: domainScore, max: 25 },
+            { label: 'Experience', score: levelScore, max: 15 },
           ].map(({ label, score, max }) => (
             <div key={label} className="bg-gray-50 rounded-lg px-2 py-1.5">
               <div className="flex justify-between items-center">
@@ -552,7 +541,7 @@ function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
     <div className="mt-3 pt-3 border-t border-gray-100">
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs text-gray-400 flex items-center gap-1">
-          Your Match
+          Skills &amp; Experience Match
           {fromResume && <span className="bg-green-100 text-green-700 text-[10px] px-1.5 py-0.5 rounded-full font-medium">resume</span>}
         </span>
         <span className={`text-xs font-semibold ${textColor}`}>{pct}% · {label}</span>
@@ -846,7 +835,7 @@ function OpportunitiesInner() {
             {seekerProfile && (
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-5 text-sm text-blue-700 flex items-center gap-2">
                 <Star size={15} className="flex-shrink-0" />
-                Match percentages are calculated based on your profile skills, work preference, and city.
+                Match percentages are based on your skills, experience, and industry alignment — not location.
               </div>
             )}
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-sm text-gray-600 flex items-start gap-2">
