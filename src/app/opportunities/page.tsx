@@ -485,15 +485,6 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
   const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
   const industryScore = computeIndustryScore(resumeText.toLowerCase(), jobCategory)
 
-  // Application strategy
-  const strategy = overallPct >= 75
-    ? { label: '✅ Apply Now', sub: 'Your profile is a strong fit. Tailor your cover letter to the keywords below.', color: 'bg-green-50 border-green-200 text-green-800' }
-    : overallPct >= 55
-    ? { label: '📝 Apply with a Tailored Resume', sub: 'Good fit — use the Resume Builder to tailor your resume before applying.', color: 'bg-yellow-50 border-yellow-200 text-yellow-700' }
-    : overallPct >= 35
-    ? { label: '🎯 Bridge the Gaps First', sub: 'Address the missing keywords below, then apply. See bridgeable gaps for quick wins.', color: 'bg-orange-50 border-orange-200 text-orange-700' }
-    : { label: '📚 Build Toward This Role', sub: 'Significant experience gaps exist. Treat this as a target — focus on the skills listed below.', color: 'bg-red-50 border-red-200 text-red-700' }
-
   const barColor = overallPct >= 75 ? 'bg-green-500' : overallPct >= 55 ? 'bg-yellow-400' : overallPct >= 35 ? 'bg-orange-400' : 'bg-red-400'
 
   // Separate required missing keywords (critical gaps) from optional
@@ -540,11 +531,6 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
           ))}
         </div>
 
-        {/* Application strategy */}
-        <div className={`rounded-lg border px-3 py-2 ${strategy.color}`}>
-          <p className="text-xs font-bold">{strategy.label}</p>
-          <p className="text-[11px] mt-0.5 opacity-90">{strategy.sub}</p>
-        </div>
       </div>
 
       {/* ATS keyword breakdown */}
