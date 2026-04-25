@@ -3,21 +3,27 @@
 CanStart Job Sync — JobSpy Edition
 Scrapes Indeed + Google Jobs for Canadian jobs and upserts into Supabase.
 Runs daily via GitHub Actions at 5 AM EDT (9 AM UTC).
+Uses direct HTTP requests to Supabase REST API (no supabase-py async issues).
 """
 
 import os
 import time
+import requests
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 from jobspy import scrape_jobs
-from supabase import create_client
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+}
 
 CANADIAN_CITIES = [
     "Ottawa", "Toronto", "Calgary", "Vancouver", "Montreal",
@@ -98,7 +104,6 @@ def extract_city(location_str: str) -> str:
     for city in CANADIAN_CITIES:
         if city.lower() in loc.lower():
             return city
-    # Fall back to first part before comma
     first = loc.split(",")[0].strip()
     return first if first else "Canada"
 
@@ -114,6 +119,58 @@ def detect_work_mode(title: str, description: str, is_remote) -> str:
     return "onsite"
 
 
+def upsert_records(records: list) -> tuple[int, list]:
+    """Batch upsert records to Supabase via REST API. Returns (count_upserted, errors)."""
+    if not records:
+        return 0, []
+
+    url = f"{SUPABASE_URL}/rest/v1/external_opportunities"
+    resp = requests.post(
+        url,
+        json=records,
+        headers={
+            **HEADERS,
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        timeout=30,
+    )
+
+    if resp.status_code in (200, 201):
+        return len(records), []
+    else:
+        return 0, [f"HTTP {resp.status_code}: {resp.text[:200]}"]
+
+
+def delete_old_jobs(thirty_days_ago: str):
+    """Delete jobs older than 30 days via REST API."""
+    url = f"{SUPABASE_URL}/rest/v1/external_opportunities"
+
+    # Delete where posted_at < 30 days ago (posted_at IS NOT NULL implied by lt. comparison)
+    # Use list of tuples so both posted_at params are sent as separate query args
+    resp1 = requests.delete(
+        url,
+        params=[("posted_at", f"lt.{thirty_days_ago}"), ("posted_at", "not.is.null")],
+        headers=HEADERS,
+        timeout=30,
+    )
+
+    # Delete where synced_at < 30 days ago AND posted_at IS NULL
+    resp2 = requests.delete(
+        url,
+        params=[("synced_at", f"lt.{thirty_days_ago}"), ("posted_at", "is.null")],
+        headers=HEADERS,
+        timeout=30,
+    )
+
+    ok1 = resp1.status_code in (200, 204)
+    ok2 = resp2.status_code in (200, 204)
+    if not ok1:
+        print(f"  Cleanup resp1 status {resp1.status_code}: {resp1.text[:100]}")
+    if not ok2:
+        print(f"  Cleanup resp2 status {resp2.status_code}: {resp2.text[:100]}")
+    return ok1 and ok2
+
+
 # ── Main Sync ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -124,6 +181,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"CanStart Job Sync — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"Queries: {len(SEARCH_QUERIES)} | Sites: Indeed + Google Jobs")
+    print(f"Supabase: {SUPABASE_URL}")
     print(f"{'='*60}")
 
     for query in SEARCH_QUERIES:
@@ -139,7 +197,7 @@ def main():
                 location="Canada",
                 country_indeed="canada",
                 results_wanted=30,
-                hours_old=168,          # last 7 days — daily sync keeps it fresh
+                hours_old=168,          # last 7 days
                 verbose=0,
                 description_format="markdown",
                 enforce_annual_salary=True,
@@ -150,12 +208,11 @@ def main():
                 time.sleep(2)
                 continue
 
-            print(f"  {len(jobs)} results")
-            inserted_this_query = 0
+            print(f"  {len(jobs)} results — building records...")
+            records = []
 
             for _, job in jobs.iterrows():
                 try:
-                    # Build stable external_id
                     job_id  = safe_str(job.get("id"))
                     job_url = safe_str(job.get("job_url", ""))
                     external_id = job_id if job_id else job_url
@@ -176,7 +233,6 @@ def main():
                     salary_min = safe_float(job.get("min_amount"))
                     salary_max = safe_float(job.get("max_amount"))
 
-                    # Real publish date from job board
                     date_posted = job.get("date_posted")
                     posted_at = None
                     if date_posted is not None and safe_str(date_posted):
@@ -188,7 +244,7 @@ def main():
                         "title":       title,
                         "company":     company,
                         "city":        city,
-                        "description": description[:15000],   # cap at 15k chars
+                        "description": description[:15000],
                         "url":         url,
                         "category":    category,
                         "salary_min":  salary_min,
@@ -197,39 +253,35 @@ def main():
                         "posted_at":   posted_at,
                         "synced_at":   now.isoformat(),
                     }
-
-                    supabase.table("external_opportunities").upsert(
-                        record, on_conflict="source,external_id"
-                    ).execute()
-
-                    total_inserted += 1
-                    inserted_this_query += 1
+                    records.append(record)
 
                 except Exception as row_err:
                     total_errors.append(f"  Row '{safe_str(job.get('title'))}': {row_err}")
 
-            print(f"  ✓ {inserted_this_query} upserted")
+            # Batch upsert all records for this query
+            if records:
+                count, errs = upsert_records(records)
+                total_inserted += count
+                total_errors.extend(errs)
+                print(f"  ✓ {count}/{len(records)} upserted")
+            else:
+                print("  No valid records")
 
         except Exception as query_err:
             msg = f"Query '{term}': {query_err}"
             total_errors.append(msg)
             print(f"  ✗ ERROR: {query_err}")
 
-        # Respectful delay between queries
         time.sleep(3)
 
     # ── Cleanup: remove jobs published over 30 days ago ──────────────────────
     thirty_days_ago = (now - timedelta(days=30)).isoformat()
     try:
-        supabase.table("external_opportunities").delete() \
-            .lt("posted_at", thirty_days_ago) \
-            .not_.is_("posted_at", "null") \
-            .execute()
-        supabase.table("external_opportunities").delete() \
-            .lt("synced_at", thirty_days_ago) \
-            .is_("posted_at", "null") \
-            .execute()
-        print("\n✓ Old jobs cleaned up (>30 days)")
+        ok = delete_old_jobs(thirty_days_ago)
+        if ok:
+            print("\n✓ Old jobs cleaned up (>30 days)")
+        else:
+            print("\n⚠ Cleanup completed with non-fatal status")
     except Exception as cleanup_err:
         print(f"\n✗ Cleanup error: {cleanup_err}")
 
