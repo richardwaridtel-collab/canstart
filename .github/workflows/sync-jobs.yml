@@ -32,4 +32,13 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/upload_jobs.py
+        run: |
+          python3 -c "
+          import os, urllib.parse
+          url = os.environ.get('SUPABASE_URL', '')
+          parsed = urllib.parse.urlparse(url)
+          print(f'Supabase host: {parsed.hostname}')
+          print(f'URL scheme: {parsed.scheme}')
+          print(f'URL valid: {bool(parsed.hostname and parsed.scheme == \"https\")}')
+          "
+          python scripts/upload_jobs.py
