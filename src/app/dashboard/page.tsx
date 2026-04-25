@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2 } from 'lucide-react'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
 type Application = { id: string; status: string; created_at: string; opportunity?: { title: string; company_name?: string; type: string } }
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const [externalApplications, setExternalApplications] = useState<ExternalApplication[]>([])
   const [postedJobs, setPostedJobs] = useState<PostedJob[]>([])
   const [loading, setLoading] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => {
     loadDashboard()
@@ -91,6 +92,14 @@ export default function DashboardPage() {
     }
 
     setLoading(false)
+  }
+
+  const deleteExternalApp = async (id: string) => {
+    if (deletingId) return
+    setDeletingId(id)
+    await supabase.from('external_applications').delete().eq('id', id)
+    setExternalApplications((prev) => prev.filter((a) => a.id !== id))
+    setDeletingId(null)
   }
 
   if (loading) {
@@ -214,6 +223,16 @@ export default function DashboardPage() {
                         <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <CheckCircle size={11} /> Tracked
                         </span>
+                        <button
+                          onClick={() => deleteExternalApp(app.id)}
+                          disabled={deletingId === app.id}
+                          className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40 p-1 rounded"
+                          title="Remove from tracker"
+                        >
+                          {deletingId === app.id
+                            ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                            : <Trash2 size={13} />}
+                        </button>
                       </div>
                     </div>
                   ))}

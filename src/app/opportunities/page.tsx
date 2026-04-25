@@ -736,9 +736,6 @@ function OpportunitiesInner() {
     } catch { /* ignore */ } finally {
       setMarkingApplied(null)
     }
-    // Open the external job in a new tab
-    window.open(job.url, '_blank', 'noopener,noreferrer')
-    track('external_job_click', { category: job.category, city: job.city })
   }
 
   const autoParseResume = async (userId: string, resumePath: string) => {
@@ -1081,7 +1078,7 @@ function OpportunitiesInner() {
               href={selectedJob.url}
               target="_blank"
               rel="noopener noreferrer"
-              onClick={() => { markApplied(selectedJob); track('external_job_click', { category: selectedJob.category, city: selectedJob.city }) }}
+              onClick={() => track('external_job_click', { category: selectedJob.category, city: selectedJob.city })}
               className="flex-1 flex items-center justify-center gap-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition-colors"
             >
               Apply Now <ExternalLink size={14} />
