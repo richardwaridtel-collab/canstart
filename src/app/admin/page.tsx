@@ -508,9 +508,19 @@ export default function AdminPage() {
                 <Clock size={14} className="text-gray-400" />
                 <span><span className="font-medium">Last sync:</span> {jbLastSync ? new Date(jbLastSync).toLocaleString('en-CA', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <CheckCircle size={14} className="text-green-500" />
-                <span>Auto-sync scheduled daily at <span className="font-medium text-gray-700">5:00 AM EDT</span> (9 AM UTC)</span>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <CheckCircle size={14} className="text-green-500" />
+                  <span>Auto-sync daily at <span className="font-medium text-gray-700">5:00 AM EDT</span> via GitHub Actions</span>
+                </div>
+                <a
+                  href="https://github.com/richardwaridtel-collab/canstart/actions/workflows/sync-jobs.yml"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs font-medium bg-gray-900 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <RefreshCw size={12} /> Trigger Sync
+                </a>
               </div>
             </div>
 
