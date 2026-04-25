@@ -13,6 +13,8 @@ type ExternalApplication = { id: string; job_title: string; company: string; job
 type PickedJob = {
   match_score: number
   job_id: string
+  matched_keywords: string[]
+  missing_keywords: string[]
   external_opportunities: {
     id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string
   } | null
@@ -99,7 +101,7 @@ export default function DashboardPage() {
       try {
         const { data: picks } = await supabase
           .from('job_matches')
-          .select('match_score, job_id, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
+          .select('match_score, job_id, matched_keywords, missing_keywords, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
           .eq('seeker_id', user.id)
           .gte('match_score', 40)
           .order('match_score', { ascending: false })
@@ -246,27 +248,45 @@ export default function DashboardPage() {
                     const job = pick.external_opportunities
                     if (!job) return null
                     const ml = matchLabel(pick.match_score)
+                    const matched = pick.matched_keywords ?? []
+                    const missing = pick.missing_keywords ?? []
                     return (
                       <Link
                         key={pick.job_id}
                         href={`/jobs/${job.id}`}
-                        className="flex items-center justify-between p-3.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
+                        className="block p-3.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
                       >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-gray-900 text-sm truncate">{job.title}</p>
-                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                            {job.company}
-                            <span className="text-gray-300">·</span>
-                            <MapPin size={10} className="inline" />{job.city}
-                            <span className="text-gray-300">·</span>
-                            <span className="capitalize">{job.work_mode}</span>
-                          </p>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-gray-900 text-sm truncate">{job.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                              {job.company}
+                              <span className="text-gray-300">·</span>
+                              <MapPin size={10} className="inline" />{job.city}
+                              <span className="text-gray-300">·</span>
+                              <span className="capitalize">{job.work_mode}</span>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
+                              {ml.label}
+                            </span>
+                            <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
-                            {ml.label}
-                          </span>
-                          <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
+                        {/* Keyword breakdown */}
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {matched.slice(0, 5).map(kw => (
+                            <span key={kw} className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {kw}</span>
+                          ))}
+                          {missing.slice(0, 3).map(kw => (
+                            <span key={kw} className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-500 font-medium">+ {kw}</span>
+                          ))}
+                          {(matched.length > 5 || missing.length > 3) && (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
+                              {matched.length} matched · {missing.length} to add →
+                            </span>
+                          )}
                         </div>
                       </Link>
                     )

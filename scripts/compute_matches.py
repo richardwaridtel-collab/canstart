@@ -182,8 +182,13 @@ def compute_score(
     job_tokens: set,
     job_category: str,
     threshold: int = 40,
-) -> int:
-    """Compute match score 0-100.
+) -> dict:
+    """Compute match result with score, matched keywords, and missing keywords.
+
+    Returns a dict:
+        score           int  0-100
+        matched         list[str]  up to 20 tokens in both resume and job
+        missing         list[str]  up to 20 job tokens absent from resume
 
     Job descriptions often contain 200-500 non-stop-word tokens (boilerplate,
     prose, legal text).  Dividing by the raw token count makes every score tiny.
@@ -191,21 +196,37 @@ def compute_score(
     most-relevant tokens in a long description isn't penalised relative to a
     tightly-written 40-token posting.
     """
+    empty = {'score': 0, 'matched': [], 'missing': sorted(job_tokens)[:20]}
     if not job_tokens or not candidate_tokens:
-        return 0
+        return empty
 
-    matched = len(job_tokens & candidate_tokens)
+    matched_tokens = job_tokens & candidate_tokens
+    missing_tokens = job_tokens - candidate_tokens
+
+    matched_count = len(matched_tokens)
     effective_denom = max(10, min(len(job_tokens), 60))
-    raw_ratio = matched / effective_denom
+    raw_ratio = matched_count / effective_denom
     confidence = min(1.0, len(job_tokens) / 10)
     kw_score = round(raw_ratio * confidence * 70)
 
+    # Prefer shorter, human-readable tokens for display (skip pure numbers / long hashes)
+    def display_tokens(tset: set, limit: int) -> list:
+        return sorted(t for t in tset if len(t) <= 30)[:limit]
+
     # Early exit: can't reach threshold even with max industry bonus (30)
     if kw_score + 30 < threshold:
-        return kw_score
+        return {
+            'score': kw_score,
+            'matched': display_tokens(matched_tokens, 20),
+            'missing': display_tokens(missing_tokens, 20),
+        }
 
     ind_score = industry_score(candidate_text_lower, job_category)
-    return min(100, kw_score + ind_score)
+    return {
+        'score': min(100, kw_score + ind_score),
+        'matched': display_tokens(matched_tokens, 20),
+        'missing': display_tokens(missing_tokens, 20),
+    }
 
 
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
@@ -341,12 +362,14 @@ def main() -> None:
             j_tokens = job['_tokens']
             if not j_tokens:
                 continue
-            score = compute_score(c_tokens, c_text, j_tokens, job.get('category', ''), SEEKER_JOB_THRESHOLD)
-            if score >= SEEKER_JOB_THRESHOLD:
+            result = compute_score(c_tokens, c_text, j_tokens, job.get('category', ''), SEEKER_JOB_THRESHOLD)
+            if result['score'] >= SEEKER_JOB_THRESHOLD:
                 job_match_records.append({
                     'seeker_id': uid,
                     'job_id': job['id'],
-                    'match_score': score,
+                    'match_score': result['score'],
+                    'matched_keywords': result['matched'],
+                    'missing_keywords': result['missing'],
                     'computed_at': computed_ts,
                 })
 
@@ -372,13 +395,15 @@ def main() -> None:
             sp = sp_map.get(uid)
             if not sp or not sp['_tokens']:
                 continue
-            score = compute_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat, CANDIDATE_THRESHOLD)
-            if score >= CANDIDATE_THRESHOLD:
+            result = compute_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat, CANDIDATE_THRESHOLD)
+            if result['score'] >= CANDIDATE_THRESHOLD:
                 candidate_match_records.append({
                     'employer_id': employer_id,
                     'opportunity_id': opp['id'],
                     'seeker_id': uid,
-                    'match_score': score,
+                    'match_score': result['score'],
+                    'matched_keywords': result['matched'],
+                    'missing_keywords': result['missing'],
                     'computed_at': computed_ts,
                 })
 

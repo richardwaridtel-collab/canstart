@@ -6,8 +6,14 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, MapPin, Building2, Calendar, ExternalLink,
-  Bookmark, Briefcase, DollarSign, Tag, Wifi,
+  Bookmark, Briefcase, DollarSign, Tag, Wifi, Sparkles,
 } from 'lucide-react'
+
+type JobMatch = {
+  match_score: number
+  matched_keywords: string[]
+  missing_keywords: string[]
+}
 
 type ExternalJob = {
   id: string
@@ -51,6 +57,7 @@ export default function JobDetailPage() {
   const [isApplied, setIsApplied] = useState(false)
   const [marking, setMarking] = useState(false)
   const [userId, setUserId] = useState<string | null>(null)
+  const [jobMatch, setJobMatch] = useState<JobMatch | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -71,13 +78,22 @@ export default function JobDetailPage() {
 
     if (user) {
       setUserId(user.id)
-      const { data: app } = await supabase
-        .from('external_applications')
-        .select('id')
-        .eq('seeker_id', user.id)
-        .eq('external_opportunity_id', id)
-        .maybeSingle()
+      const [{ data: app }, { data: matchData }] = await Promise.all([
+        supabase
+          .from('external_applications')
+          .select('id')
+          .eq('seeker_id', user.id)
+          .eq('external_opportunity_id', id)
+          .maybeSingle(),
+        supabase
+          .from('job_matches')
+          .select('match_score, matched_keywords, missing_keywords')
+          .eq('seeker_id', user.id)
+          .eq('job_id', id)
+          .maybeSingle(),
+      ])
       if (app) setIsApplied(true)
+      if (matchData) setJobMatch(matchData as JobMatch)
     }
 
     setLoading(false)
@@ -194,6 +210,72 @@ export default function JobDetailPage() {
             {job.description || 'No description available for this listing.'}
           </div>
         </div>
+
+        {/* ── How You Match (only shown when a pre-computed match exists) ── */}
+        {jobMatch && (
+          <div className="bg-white rounded-2xl border border-purple-200 p-6 mb-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles size={16} className="text-purple-500" />
+              <h2 className="text-sm font-bold text-gray-900 uppercase tracking-widest">How You Match</h2>
+            </div>
+
+            {/* Tier label + bar */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className={`h-2 rounded-full transition-all ${
+                    jobMatch.match_score >= 70 ? 'bg-green-500' :
+                    jobMatch.match_score >= 55 ? 'bg-blue-500' : 'bg-gray-400'
+                  }`}
+                  style={{ width: `${Math.min(100, jobMatch.match_score)}%` }}
+                />
+              </div>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                jobMatch.match_score >= 70 ? 'bg-green-100 text-green-700' :
+                jobMatch.match_score >= 55 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+              }`}>
+                {jobMatch.match_score >= 70 ? 'Strong Match' : jobMatch.match_score >= 55 ? 'Good Match' : 'Possible Match'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Matched skills */}
+              {jobMatch.matched_keywords.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-green-700 mb-1.5">
+                    ✅ Skills you have ({jobMatch.matched_keywords.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {jobMatch.matched_keywords.map(kw => (
+                      <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700 font-medium">
+                        {kw}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Missing skills */}
+              {jobMatch.missing_keywords.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-red-600 mb-1.5">
+                    ➕ Skills to add to your resume ({jobMatch.missing_keywords.length})
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {jobMatch.missing_keywords.map(kw => (
+                      <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-red-50 border border-red-200 text-red-600 font-medium">
+                        {kw}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">
+                    Adding relevant missing skills to your resume improves your visibility to employers.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Action card */}
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
