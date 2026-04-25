@@ -70,11 +70,18 @@ def main():
     with open("jobs.json", encoding="utf-8") as f:
         records = json.load(f)
 
+    # Deduplicate by (source, external_id) — keep last occurrence
+    seen = {}
+    for r in records:
+        key = (r["source"], r["external_id"])
+        seen[key] = r
+    records = list(seen.values())
+
     now = datetime.now(timezone.utc)
 
     print(f"\n{'='*60}")
     print(f"UPLOAD STEP — {now.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"Records to upload: {len(records)}")
+    print(f"Records to upload: {len(records)} (after dedup)")
     print(f"Supabase: {SUPABASE_URL}")
     print(f"{'='*60}")
 
