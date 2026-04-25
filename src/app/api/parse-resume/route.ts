@@ -42,6 +42,13 @@ export async function POST(request: Request) {
       const mammoth = require('mammoth') as { extractRawText: (opts: { buffer: Buffer }) => Promise<{ value: string }> }
       const result = await mammoth.extractRawText({ buffer })
       text = result.value
+    } else if (ext === 'doc') {
+      // Legacy Word binary format — use word-extractor (pure JS, no native deps)
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const WordExtractor = require('word-extractor') as new () => { extract: (buf: Buffer) => Promise<{ getBody: () => string }> }
+      const extractor = new WordExtractor()
+      const doc = await extractor.extract(buffer)
+      text = doc.getBody()
     }
   } catch (err) {
     return NextResponse.json({ error: `Parse failed: ${err instanceof Error ? err.message : 'unknown'}` }, { status: 500 })
