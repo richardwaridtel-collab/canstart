@@ -181,19 +181,28 @@ def compute_score(
     candidate_text_lower: str,
     job_tokens: set,
     job_category: str,
+    threshold: int = 40,
 ) -> int:
-    """Compute match score 0-100 (mirrors TypeScript computeJobMatch)."""
+    """Compute match score 0-100.
+
+    Job descriptions often contain 200-500 non-stop-word tokens (boilerplate,
+    prose, legal text).  Dividing by the raw token count makes every score tiny.
+    We cap the effective denominator at 60 so that matching 30 out of the
+    most-relevant tokens in a long description isn't penalised relative to a
+    tightly-written 40-token posting.
+    """
     if not job_tokens or not candidate_tokens:
         return 0
 
     matched = len(job_tokens & candidate_tokens)
-    raw_ratio = matched / len(job_tokens)
+    effective_denom = max(10, min(len(job_tokens), 60))
+    raw_ratio = matched / effective_denom
     confidence = min(1.0, len(job_tokens) / 10)
     kw_score = round(raw_ratio * confidence * 70)
 
     # Early exit: can't reach threshold even with max industry bonus (30)
-    if kw_score + 30 < 70:
-        return kw_score  # caller skips if < 70
+    if kw_score + 30 < threshold:
+        return kw_score
 
     ind_score = industry_score(candidate_text_lower, job_category)
     return min(100, kw_score + ind_score)
@@ -279,7 +288,6 @@ def main() -> None:
     skipped = 0
     for uid, sp in sp_map.items():
         raw = sp.get('resume_text') or ''
-        resume_len = len(raw)
         skills = sp.get('skills') or []
         if not raw or len(raw) < 30:
             raw = ' '.join(skills)
@@ -287,7 +295,6 @@ def main() -> None:
         sp['_tokens'] = tokenize(sp['_text_lower']) if len(raw) >= 30 else set()
         if not sp['_tokens']:
             skipped += 1
-        print(f"  Profile {uid[:8]}… resume_text={resume_len} chars, skills={len(skills)}, tokens={len(sp['_tokens'])}")
     if skipped:
         print(f"  ⚠ {skipped} profile(s) skipped — no resume text or skills found")
 
@@ -316,8 +323,9 @@ def main() -> None:
         ).lower()
         opp['_tokens'] = tokenize(full) - SOFT_SKILLS
 
-    # ── 2. Seeker ↔ External Job matching (threshold ≥70%) ───────────────────
-    print(f"\n[1/2] Seeker–Job matching (threshold ≥70%)")
+    # ── 2. Seeker ↔ External Job matching (threshold ≥40%) ───────────────────
+    SEEKER_JOB_THRESHOLD = 40
+    print(f"\n[1/2] Seeker–Job matching (threshold ≥{SEEKER_JOB_THRESHOLD}%)")
     job_match_records: list[dict] = []
     computed_ts = now.isoformat()
 
@@ -333,8 +341,8 @@ def main() -> None:
             j_tokens = job['_tokens']
             if not j_tokens:
                 continue
-            score = compute_score(c_tokens, c_text, j_tokens, job.get('category', ''))
-            if score >= 70:
+            score = compute_score(c_tokens, c_text, j_tokens, job.get('category', ''), SEEKER_JOB_THRESHOLD)
+            if score >= SEEKER_JOB_THRESHOLD:
                 job_match_records.append({
                     'seeker_id': uid,
                     'job_id': job['id'],
@@ -345,8 +353,9 @@ def main() -> None:
     print(f"  Matches found: {len(job_match_records)}")
     upsert_batch('job_matches', job_match_records, 'seeker_id,job_id')
 
-    # ── 3. Employer ↔ Candidate matching (threshold ≥75%) ────────────────────
-    print(f"\n[2/2] Employer–Candidate matching (threshold ≥75%)")
+    # ── 3. Employer ↔ Candidate matching (threshold ≥50%) ────────────────────
+    CANDIDATE_THRESHOLD = 50
+    print(f"\n[2/2] Employer–Candidate matching (threshold ≥{CANDIDATE_THRESHOLD}%)")
     candidate_match_records: list[dict] = []
 
     for opp in open_opps:
@@ -363,8 +372,8 @@ def main() -> None:
             sp = sp_map.get(uid)
             if not sp or not sp['_tokens']:
                 continue
-            score = compute_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat)
-            if score >= 75:
+            score = compute_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat, CANDIDATE_THRESHOLD)
+            if score >= CANDIDATE_THRESHOLD:
                 candidate_match_records.append({
                     'employer_id': employer_id,
                     'opportunity_id': opp['id'],
