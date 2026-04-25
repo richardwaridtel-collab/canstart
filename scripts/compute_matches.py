@@ -276,12 +276,20 @@ def main() -> None:
     print(f"  Seeker profiles loaded: {len(sp_map)}")
 
     # Pre-tokenize candidate texts
+    skipped = 0
     for uid, sp in sp_map.items():
         raw = sp.get('resume_text') or ''
+        resume_len = len(raw)
+        skills = sp.get('skills') or []
         if not raw or len(raw) < 30:
-            raw = ' '.join(sp.get('skills') or [])
+            raw = ' '.join(skills)
         sp['_text_lower'] = raw.lower()
         sp['_tokens'] = tokenize(sp['_text_lower']) if len(raw) >= 30 else set()
+        if not sp['_tokens']:
+            skipped += 1
+        print(f"  Profile {uid[:8]}… resume_text={resume_len} chars, skills={len(skills)}, tokens={len(sp['_tokens'])}")
+    if skipped:
+        print(f"  ⚠ {skipped} profile(s) skipped — no resume text or skills found")
 
     ext_jobs = fetch_all(
         'external_opportunities',
