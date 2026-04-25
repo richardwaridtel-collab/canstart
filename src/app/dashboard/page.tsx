@@ -19,6 +19,16 @@ type PickedJob = {
 }
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
 
+/** Convert internal match score (0-100) to a display label + colour class.
+ *  We never show the raw number — it comes from a capped-denominator formula
+ *  that differs from the live browse-page scorer, so a literal "%" would
+ *  conflict with what candidates see elsewhere and mislead them. */
+function matchLabel(score: number): { label: string; cls: string } {
+  if (score >= 70) return { label: 'Strong Match',    cls: 'bg-green-100 text-green-700' }
+  if (score >= 55) return { label: 'Good Match',      cls: 'bg-blue-100 text-blue-700'  }
+  return              { label: 'Possible Match',   cls: 'bg-gray-100 text-gray-600'  }
+}
+
 const statusIcon = (status: string) => {
   if (status === 'accepted') return <CheckCircle size={16} className="text-green-500" />
   if (status === 'rejected') return <XCircle size={16} className="text-red-400" />
@@ -85,13 +95,13 @@ export default function DashboardPage() {
         .order('applied_at', { ascending: false })
       setExternalApplications((extApps || []) as ExternalApplication[])
 
-      // Load "Picked for You" pre-computed matches (≥70%)
+      // Load "Picked for You" pre-computed matches (≥40 internal score)
       try {
         const { data: picks } = await supabase
           .from('job_matches')
           .select('match_score, job_id, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
           .eq('seeker_id', user.id)
-          .gte('match_score', 70)
+          .gte('match_score', 40)
           .order('match_score', { ascending: false })
           .limit(10)
         if (picks) setPickedJobs(picks as unknown as PickedJob[])
@@ -118,7 +128,7 @@ export default function DashboardPage() {
           .from('candidate_matches')
           .select('match_score, seeker_id, opportunity_id, opportunities(title)')
           .eq('employer_id', user.id)
-          .gte('match_score', 75)
+          .gte('match_score', 50)
           .order('match_score', { ascending: false })
           .limit(20)
 
@@ -229,12 +239,13 @@ export default function DashboardPage() {
                   </Link>
                 </div>
                 <p className="text-xs text-gray-500 mb-4">
-                  {pickedJobs.length} job{pickedJobs.length !== 1 ? 's' : ''} matching ≥70% of your resume profile · refreshed daily at 5:30 AM
+                  {pickedJobs.length} job{pickedJobs.length !== 1 ? 's' : ''} selected based on your resume skills · refreshed daily at 5:30 AM
                 </p>
                 <div className="space-y-2">
                   {pickedJobs.map((pick) => {
                     const job = pick.external_opportunities
                     if (!job) return null
+                    const ml = matchLabel(pick.match_score)
                     return (
                       <Link
                         key={pick.job_id}
@@ -252,8 +263,8 @@ export default function DashboardPage() {
                           </p>
                         </div>
                         <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                          <span className={`text-sm font-bold ${pick.match_score >= 85 ? 'text-green-600' : 'text-purple-600'}`}>
-                            {pick.match_score}%
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
+                            {ml.label}
                           </span>
                           <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
                         </div>
@@ -412,26 +423,31 @@ export default function DashboardPage() {
                   </Link>
                 </div>
                 <p className="text-xs text-gray-500 mb-4">
-                  {candidateMatches.length} candidate{candidateMatches.length !== 1 ? 's' : ''} matching ≥75% of your job requirements · refreshed daily at 5:30 AM
+                  {candidateMatches.length} candidate{candidateMatches.length !== 1 ? 's' : ''} selected based on your job requirements · refreshed daily at 5:30 AM
                 </p>
                 <div className="space-y-2">
-                  {candidateMatches.map((match, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3.5 bg-green-50 rounded-xl border border-green-100">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 text-sm">{match.seeker_name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                          {match.seeker_city && <><MapPin size={10} className="inline" />{match.seeker_city}<span className="text-gray-300">·</span></>}
-                          For: <span className="font-medium text-gray-600">{match.opportunity_title}</span>
-                        </p>
+                  {candidateMatches.map((match, idx) => {
+                    const ml = matchLabel(match.match_score)
+                    return (
+                      <div key={idx} className="flex items-center justify-between p-3.5 bg-green-50 rounded-xl border border-green-100">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm">{match.seeker_name}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                            {match.seeker_city && <><MapPin size={10} className="inline" />{match.seeker_city}<span className="text-gray-300">·</span></>}
+                            For: <span className="font-medium text-gray-600">{match.opportunity_title}</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3 ml-3 flex-shrink-0">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
+                            {ml.label}
+                          </span>
+                          <Link href="/candidates" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                            View Profile
+                          </Link>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 ml-3 flex-shrink-0">
-                        <span className="text-sm font-bold text-green-600">{match.match_score}%</span>
-                        <Link href="/candidates" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
-                          View Profile
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
