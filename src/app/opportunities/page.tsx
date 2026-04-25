@@ -1,13 +1,15 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar, Sparkles } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
+import { matchesKeyword, scoreKeywords } from '@/lib/keywordMatcher'
+import type { ExtractedKeywords } from '@/app/api/extract-keywords/route'
 
 const CITIES = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
 const TYPES = ['All Types', 'volunteer', 'micro-internship', 'paid']
@@ -238,6 +240,7 @@ function computeJobMatch(
   _workMode: string,
   _jobCity: string,
   jobCategory: string = '',
+  llmKeywords?: ExtractedKeywords | null,
 ): number {
   if (!seeker) return 0
 
@@ -246,26 +249,30 @@ function computeJobMatch(
   const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
 
   // ── Factor 1: Domain-specific keyword coverage (70 pts) ──────────────────────
-  const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
-    .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
+  let keywords: Array<{ keyword: string; required: boolean }>
 
-  let weightedMatched = 0
-  let weightedTotal = 0
-  keywords.forEach(({ keyword, required }) => {
-    const weight = required ? 2 : 1
-    weightedTotal += weight
-    if (candidateText.includes(keyword.toLowerCase())) weightedMatched += weight
-  })
-  requiredSkills.filter(Boolean).forEach((s) => {
-    if (!SOFT_SKILLS_EXCLUDED.has(s.toLowerCase()) &&
-        !keywords.find((k) => k.keyword.toLowerCase() === s.toLowerCase())) {
-      weightedTotal += 2
-      if (candidateText.includes(s.toLowerCase())) weightedMatched += 2
-    }
-  })
-  // Confidence factor: if fewer than 6 domain keywords are extracted from the job,
-  // we don't have enough signal. 2/2 matching shouldn't give 70/70 — it's unreliable.
-  // Full confidence (1.0) requires 10+ keywords. Below that, score is penalised.
+  if (llmKeywords && (llmKeywords.required_skills.length + llmKeywords.preferred_skills.length + llmKeywords.keywords.length) > 0) {
+    // Use LLM-extracted keywords (higher quality, job-specific)
+    keywords = [
+      ...llmKeywords.required_skills.map(k => ({ keyword: k, required: true })),
+      ...llmKeywords.preferred_skills.map(k => ({ keyword: k, required: false })),
+      ...llmKeywords.keywords.map(k => ({ keyword: k, required: false })),
+    ].filter(({ keyword }) => keyword.trim().length > 0 && !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
+  } else {
+    // Fall back to curated extraction
+    keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+      .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
+  }
+
+  // Word-boundary matching (prevents "SQL" matching "MySQL", "Java" matching "JavaScript")
+  const { weightedMatched, weightedTotal } = scoreKeywords(candidateText, keywords)
+
+  // If using curated extraction, also check explicit requiredSkills with word-boundary
+  if (!llmKeywords) {
+    // already handled inside extractJobKeywords — nothing extra needed
+  }
+
+  // Confidence factor: if fewer than 6 domain keywords found, penalise score
   const uniqueKeywordCount = keywords.length
   const confidenceFactor = Math.min(1, uniqueKeywordCount / 10)
   const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
@@ -282,8 +289,8 @@ function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): n
   return computeJobMatch(seeker, opp.title, opp.description || '', opp.skills_required || [], opp.work_mode, opp.city, cat)
 }
 
-function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
-  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city, job.category)
+function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob, llmKeywords?: ExtractedKeywords | null): number {
+  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city, job.category, llmKeywords)
 }
 
 // ─── ATS Keyword Analysis ────────────────────────────────────────────────────
@@ -424,11 +431,20 @@ function extractJobKeywords(title: string, description: string, requiredSkills: 
     .slice(0, 28)
 }
 
-function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory }: {
-  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string; jobCategory: string
+function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory, llmKeywords, llmLoading }: {
+  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string; jobCategory: string; llmKeywords?: ExtractedKeywords | null; llmLoading?: boolean
 }) {
-  const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
-  if (!keywords.length) return null
+  // Prefer LLM-extracted keywords; fall back to curated extraction
+  const usingLLM = llmKeywords && (llmKeywords.required_skills.length + llmKeywords.preferred_skills.length + llmKeywords.keywords.length) > 0
+  const keywords: Array<{ keyword: string; required: boolean }> = usingLLM
+    ? [
+        ...llmKeywords!.required_skills.map(k => ({ keyword: k, required: true })),
+        ...llmKeywords!.preferred_skills.map(k => ({ keyword: k, required: false })),
+        ...llmKeywords!.keywords.map(k => ({ keyword: k, required: false })),
+      ].filter(kw => kw.keyword.trim())
+    : extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+
+  if (!keywords.length && !llmLoading) return null
 
   // No resume — show keywords only, prompt to upload
   if (!resumeText || resumeText.length < 50) {
@@ -437,6 +453,8 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
             <Target size={12} className="text-purple-500" /> ATS Keywords for this role
+            {usingLLM && <span className="flex items-center gap-0.5 text-[10px] text-purple-500 font-normal"><Sparkles size={9} /> AI</span>}
+            {llmLoading && <span className="text-[10px] text-gray-400 font-normal animate-pulse">extracting…</span>}
           </span>
           <a href="/profile/setup" className="text-[11px] text-purple-600 hover:underline font-medium">Upload resume to check match →</a>
         </div>
@@ -452,22 +470,20 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
     )
   }
 
-  const lower = resumeText.toLowerCase()
-  const matched = keywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase()))
-  const missing = keywords.filter(({ keyword }) => !lower.includes(keyword.toLowerCase()))
-  const atsPct = Math.round((matched.length / keywords.length) * 100)
+  // Word-boundary matching (from keywordMatcher.ts — prevents false substring matches)
+  const { matched, missing } = scoreKeywords(resumeText, keywords)
+  const atsPct = keywords.length > 0 ? Math.round((matched.length / keywords.length) * 100) : 0
 
   // Unified overall score
-  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory)
+  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory, llmKeywords)
 
-  // Score breakdown (mirrors computeJobMatch logic, for display)
+  // Score breakdown
   const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
-  const weightedMatched = domainKeywords.filter(({ keyword }) => lower.includes(keyword.toLowerCase())).reduce((s, { required }) => s + (required ? 2 : 1), 0)
-  const weightedTotal = domainKeywords.reduce((s, { required }) => s + (required ? 2 : 1), 0)
+  const { weightedMatched, weightedTotal } = scoreKeywords(resumeText, domainKeywords)
   const confidenceFactor = Math.min(1, domainKeywords.length / 10)
   const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
   const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
-  const industryScore = computeIndustryScore(lower, jobCategory)
+  const industryScore = computeIndustryScore(resumeText.toLowerCase(), jobCategory)
 
   // Application strategy
   const strategy = overallPct >= 75
@@ -493,6 +509,12 @@ function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, require
         <div className="flex items-center justify-between mb-1.5">
           <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
             <Target size={12} className="text-purple-500" /> Match Analysis
+            {usingLLM && (
+              <span className="flex items-center gap-0.5 bg-purple-50 text-purple-600 text-[10px] px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
+                <Sparkles size={9} /> AI keywords
+              </span>
+            )}
+            {llmLoading && <span className="text-[10px] text-gray-400 animate-pulse">analyzing…</span>}
           </span>
           <span className="text-xs font-bold text-gray-600">{overallPct}% overall match</span>
         </div>
@@ -647,6 +669,41 @@ function OpportunitiesInner() {
   const [markingApplied, setMarkingApplied] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [selectedJob, setSelectedJob] = useState<ExternalJob | null>(null)
+
+  // LLM keyword cache: jobId → extracted keywords (session-scoped, fetched on demand)
+  const llmKeywordsCache = useRef<Map<string, ExtractedKeywords>>(new Map())
+  const llmFetchingRef = useRef<Set<string>>(new Set())
+  // forceUpdate triggers re-render after LLM keywords arrive (refs don't cause re-renders alone)
+  const [llmTick, setLlmTick] = useState(0)
+
+  const getLLMKeywords = (jobId: string): ExtractedKeywords | null => {
+    void llmTick // ensure component re-renders when cache updates
+    return llmKeywordsCache.current.get(jobId) ?? null
+  }
+
+  const isLLMFetching = (jobId: string): boolean => {
+    void llmTick
+    return llmFetchingRef.current.has(jobId)
+  }
+
+  const fetchLLMKeywords = async (job: ExternalJob) => {
+    if (!job.description || llmKeywordsCache.current.has(job.id) || llmFetchingRef.current.has(job.id)) return
+    llmFetchingRef.current.add(job.id)
+    setLlmTick(t => t + 1)
+    try {
+      const res = await fetch('/api/extract-keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: job.description, title: job.title }),
+      })
+      if (res.ok) {
+        const data: ExtractedKeywords = await res.json()
+        llmKeywordsCache.current.set(job.id, data)
+      }
+    } catch { /* silent fail — fall back to curated extraction */ }
+    llmFetchingRef.current.delete(job.id)
+    setLlmTick(t => t + 1)
+  }
 
   useEffect(() => {
     checkAuth()
@@ -965,7 +1022,7 @@ function OpportunitiesInner() {
                         <button
                           onClick={() => {
                             if (!isLoggedIn) { router.push('/auth/signin?redirect=/opportunities'); return }
-                            setSelectedJob(job); track('external_job_view', { category: job.category, city: job.city })
+                            setSelectedJob(job); fetchLLMKeywords(job); track('external_job_view', { category: job.category, city: job.city })
                           }}
                           className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors"
                         >
@@ -989,9 +1046,25 @@ function OpportunitiesInner() {
                         ) : null}
                       </div>
 
-                      {seekerProfile && (
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={job.title} jobDescription={job.description || ''} workMode={job.work_mode} jobCity={job.city} jobCategory={job.category} />
-                      )}
+                      {seekerProfile && (() => {
+                        // Trigger LLM keyword fetch on first render of this job card
+                        if (!llmKeywordsCache.current.has(job.id) && !llmFetchingRef.current.has(job.id)) {
+                          fetchLLMKeywords(job)
+                        }
+                        return (
+                          <ATSPanel
+                            resumeText={seekerProfile.resume_text || ''}
+                            seekerProfile={seekerProfile}
+                            jobTitle={job.title}
+                            jobDescription={job.description || ''}
+                            workMode={job.work_mode}
+                            jobCity={job.city}
+                            jobCategory={job.category}
+                            llmKeywords={getLLMKeywords(job.id)}
+                            llmLoading={isLLMFetching(job.id)}
+                          />
+                        )
+                      })()}
                     </div>
                   )
                 })}
@@ -1049,6 +1122,8 @@ function OpportunitiesInner() {
                   workMode={selectedJob.work_mode}
                   jobCity={selectedJob.city}
                   jobCategory={selectedJob.category}
+                  llmKeywords={getLLMKeywords(selectedJob.id)}
+                  llmLoading={isLLMFetching(selectedJob.id)}
                 />
               </div>
             )}
