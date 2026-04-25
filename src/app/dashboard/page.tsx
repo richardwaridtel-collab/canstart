@@ -4,12 +4,20 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2 } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin } from 'lucide-react'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
 type Application = { id: string; status: string; created_at: string; opportunity?: { title: string; company_name?: string; type: string } }
 type PostedJob = { id: string; title: string; status: string; created_at: string; type: string; applications_count?: number }
-type ExternalApplication = { id: string; job_title: string; company: string; job_url: string; applied_at: string }
+type ExternalApplication = { id: string; job_title: string; company: string; job_url: string; applied_at: string; external_opportunity_id?: string }
+type PickedJob = {
+  match_score: number
+  job_id: string
+  external_opportunities: {
+    id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string
+  } | null
+}
+type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
 
 const statusIcon = (status: string) => {
   if (status === 'accepted') return <CheckCircle size={16} className="text-green-500" />
@@ -32,6 +40,8 @@ export default function DashboardPage() {
   const [postedJobs, setPostedJobs] = useState<PostedJob[]>([])
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [pickedJobs, setPickedJobs] = useState<PickedJob[]>([])
+  const [candidateMatches, setCandidateMatches] = useState<CandidateMatch[]>([])
 
   useEffect(() => {
     loadDashboard()
@@ -70,10 +80,22 @@ export default function DashboardPage() {
 
       const { data: extApps } = await supabase
         .from('external_applications')
-        .select('id, job_title, company, job_url, applied_at')
+        .select('id, job_title, company, job_url, applied_at, external_opportunity_id')
         .eq('seeker_id', user.id)
         .order('applied_at', { ascending: false })
       setExternalApplications((extApps || []) as ExternalApplication[])
+
+      // Load "Picked for You" pre-computed matches (≥70%)
+      try {
+        const { data: picks } = await supabase
+          .from('job_matches')
+          .select('match_score, job_id, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
+          .eq('seeker_id', user.id)
+          .gte('match_score', 70)
+          .order('match_score', { ascending: false })
+          .limit(10)
+        if (picks) setPickedJobs(picks as unknown as PickedJob[])
+      } catch { /* table not yet created — silently skip */ }
     } else {
       const { data: jobs } = await supabase
         .from('opportunities')
@@ -89,6 +111,35 @@ export default function DashboardPage() {
         type: j.type as string,
         applications_count: Array.isArray(j.applications) ? j.applications.length : 0,
       })))
+
+      // Load top candidate matches (≥75%) for employer's open jobs
+      try {
+        const { data: matches } = await supabase
+          .from('candidate_matches')
+          .select('match_score, seeker_id, opportunity_id, opportunities(title)')
+          .eq('employer_id', user.id)
+          .gte('match_score', 75)
+          .order('match_score', { ascending: false })
+          .limit(20)
+
+        if (matches && matches.length > 0) {
+          const seekerIds = [...new Set(matches.map((m: Record<string, unknown>) => m.seeker_id as string))]
+          const { data: seekerProfs } = await supabase
+            .from('profiles')
+            .select('user_id, full_name, city')
+            .in('user_id', seekerIds)
+          const profMap = new Map((seekerProfs || []).map((p: Record<string, unknown>) => [p.user_id as string, p]))
+
+          setCandidateMatches(matches.map((m: Record<string, unknown>) => ({
+            match_score: m.match_score as number,
+            seeker_id: m.seeker_id as string,
+            opportunity_id: m.opportunity_id as string,
+            opportunity_title: ((m.opportunities as Record<string, unknown> | null)?.title as string) || 'Opportunity',
+            seeker_name: (profMap.get(m.seeker_id as string) as Record<string, unknown>)?.full_name as string || 'Candidate',
+            seeker_city: (profMap.get(m.seeker_id as string) as Record<string, unknown>)?.city as string || '',
+          })))
+        }
+      } catch { /* table not yet created — silently skip */ }
     }
 
     setLoading(false)
@@ -166,6 +217,53 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* ── Picked for You ─────────────────────────────────────── */}
+            {pickedJobs.length > 0 && (
+              <div className="bg-white rounded-2xl border border-purple-200 p-6 mb-6">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                    <Sparkles size={18} className="text-purple-500" /> Picked for You Only
+                  </h2>
+                  <Link href="/opportunities" className="text-sm text-purple-600 hover:text-purple-700 flex items-center gap-1">
+                    Browse all <ArrowRight size={14} />
+                  </Link>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">
+                  {pickedJobs.length} job{pickedJobs.length !== 1 ? 's' : ''} matching ≥70% of your resume profile · refreshed daily at 5:30 AM
+                </p>
+                <div className="space-y-2">
+                  {pickedJobs.map((pick) => {
+                    const job = pick.external_opportunities
+                    if (!job) return null
+                    return (
+                      <Link
+                        key={pick.job_id}
+                        href={`/jobs/${job.id}`}
+                        className="flex items-center justify-between p-3.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm truncate">{job.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                            {job.company}
+                            <span className="text-gray-300">·</span>
+                            <MapPin size={10} className="inline" />{job.city}
+                            <span className="text-gray-300">·</span>
+                            <span className="capitalize">{job.work_mode}</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                          <span className={`text-sm font-bold ${pick.match_score >= 85 ? 'text-green-600' : 'text-purple-600'}`}>
+                            {pick.match_score}%
+                          </span>
+                          <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-bold text-gray-900 text-lg">My Applications</h2>
@@ -217,9 +315,15 @@ export default function DashboardPage() {
                         <p className="text-xs text-gray-500 mt-0.5">{app.company} · {new Date(app.applied_at).toLocaleDateString()}</p>
                       </div>
                       <div className="flex items-center gap-2 ml-3">
-                        <a href={app.job_url} target="_blank" rel="noopener noreferrer" className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
-                          <ExternalLink size={12} /> View
-                        </a>
+                        {app.external_opportunity_id ? (
+                          <Link href={`/jobs/${app.external_opportunity_id}`} className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
+                            <Eye size={12} /> View
+                          </Link>
+                        ) : (
+                          <a href={app.job_url} target="_blank" rel="noopener noreferrer" className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium">
+                            <ExternalLink size={12} /> View
+                          </a>
+                        )}
                         <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1">
                           <CheckCircle size={11} /> Tracked
                         </span>
@@ -296,6 +400,41 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+            {/* ── Top Candidate Matches ───────────────────────────────── */}
+            {candidateMatches.length > 0 && (
+              <div className="bg-white rounded-2xl border border-green-200 p-6 mt-6">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                    <Target size={18} className="text-green-500" /> Top Candidate Matches
+                  </h2>
+                  <Link href="/candidates" className="text-sm text-green-600 hover:text-green-700 flex items-center gap-1">
+                    Browse all <ArrowRight size={14} />
+                  </Link>
+                </div>
+                <p className="text-xs text-gray-500 mb-4">
+                  {candidateMatches.length} candidate{candidateMatches.length !== 1 ? 's' : ''} matching ≥75% of your job requirements · refreshed daily at 5:30 AM
+                </p>
+                <div className="space-y-2">
+                  {candidateMatches.map((match, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3.5 bg-green-50 rounded-xl border border-green-100">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 text-sm">{match.seeker_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                          {match.seeker_city && <><MapPin size={10} className="inline" />{match.seeker_city}<span className="text-gray-300">·</span></>}
+                          For: <span className="font-medium text-gray-600">{match.opportunity_title}</span>
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 ml-3 flex-shrink-0">
+                        <span className="text-sm font-bold text-green-600">{match.match_score}%</span>
+                        <Link href="/candidates" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                          View Profile
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar, Sparkles } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar, Sparkles, ChevronDown } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
 import { matchesKeyword, scoreKeywords } from '@/lib/keywordMatcher'
@@ -637,6 +637,85 @@ function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
   )
 }
 
+// ── Multi-select dropdown ─────────────────────────────────────────────────────
+
+function MultiSelectDropdown<T extends string | number>({
+  label,
+  options,
+  selected,
+  onChange,
+  icon,
+}: {
+  label: string
+  options: Array<{ label: string; value: T }>
+  selected: T[]
+  onChange: (vals: T[]) => void
+  icon?: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const toggle = (val: T) => {
+    onChange(selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val])
+  }
+
+  const displayLabel =
+    selected.length === 0
+      ? label
+      : selected.length <= 2
+      ? options.filter((o) => selected.includes(o.value)).map((o) => o.label).join(', ')
+      : `${selected.length} selected`
+
+  const active = selected.length > 0
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm focus:outline-none transition-colors border
+          ${active ? 'bg-red-50 border-red-300 text-red-700' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'}`}
+      >
+        {icon}
+        <span className="max-w-[130px] truncate">{displayLabel}</span>
+        {active && (
+          <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+            {selected.length}
+          </span>
+        )}
+        <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl z-30 min-w-[180px] py-1.5 max-h-60 overflow-y-auto">
+          {options.map(({ label: optLabel, value }) => (
+            <label
+              key={String(value)}
+              className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm text-gray-700 select-none"
+            >
+              <input
+                type="checkbox"
+                checked={selected.includes(value)}
+                onChange={() => toggle(value)}
+                className="rounded accent-red-600 flex-shrink-0"
+              />
+              {optLabel}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function OpportunitiesPage() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin" /></div>}>
@@ -655,13 +734,13 @@ function OpportunitiesInner() {
   const [filteredCanstart, setFilteredCanstart] = useState<Opportunity[]>([])
   const [filteredExternal, setFilteredExternal] = useState<ExternalJob[]>([])
   const [search, setSearch] = useState('')
-  const [city, setCity] = useState('All Cities')
-  const [type, setType] = useState('All Types')
-  const [mode, setMode] = useState('All Modes')
-  const [category, setCategory] = useState('All Categories')
-  const [experience, setExperience] = useState('Any Level')
+  const [cities, setCities] = useState<string[]>([])
+  const [types, setTypes] = useState<string[]>([])
+  const [modes, setModes] = useState<string[]>([])
+  const [categories, setCategories] = useState<string[]>([])
+  const [experiences, setExperiences] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<'canstart' | 'external'>('external')
-  const [dateFilter, setDateFilter] = useState(0) // 0 = any time, N = last N days
+  const [dateFilters, setDateFilters] = useState<number[]>([]) // empty = any time
   const [loading, setLoading] = useState(false)
   const [externalLoading, setExternalLoading] = useState(false)
   const [lastSynced, setLastSynced] = useState<string | null>(null)
@@ -713,7 +792,7 @@ function OpportunitiesInner() {
   // Read ?city= query param from home page city links
   useEffect(() => {
     const urlCity = searchParams.get('city')
-    if (urlCity && CITIES.includes(urlCity)) setCity(urlCity)
+    if (urlCity && CITIES.includes(urlCity)) setCities([urlCity])
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -725,26 +804,44 @@ function OpportunitiesInner() {
       cs = cs.filter((o) => o.title.toLowerCase().includes(q) || o.description.toLowerCase().includes(q) || o.company_name.toLowerCase().includes(q) || o.skills_required?.some((s) => s.toLowerCase().includes(q)))
       ext = ext.filter((o) => o.title.toLowerCase().includes(q) || o.description?.toLowerCase().includes(q) || o.company.toLowerCase().includes(q))
     }
-    if (city !== 'All Cities') { cs = cs.filter((o) => o.city === city); ext = ext.filter((o) => o.city === city) }
-    if (type !== 'All Types') cs = cs.filter((o) => o.type === type)
-    if (mode !== 'All Modes') { cs = cs.filter((o) => o.work_mode === mode); ext = ext.filter((o) => o.work_mode === mode) }
-    if (category !== 'All Categories') {
-      cs = cs.filter((o) => (o as unknown as { category?: string }).category?.toLowerCase().includes(category.split(' ')[0].toLowerCase()) ?? false)
-      ext = ext.filter((o) => o.category.toLowerCase().includes(category.split(' ')[0].toLowerCase()))
+
+    // Multi-select filters — OR logic within each category
+    if (cities.length > 0) {
+      cs = cs.filter((o) => cities.includes(o.city))
+      ext = ext.filter((o) => cities.includes(o.city))
     }
-    if (experience !== 'Any Level') {
+    if (types.length > 0) {
+      cs = cs.filter((o) => types.includes(o.type))
+    }
+    if (modes.length > 0) {
+      cs = cs.filter((o) => modes.includes(o.work_mode))
+      ext = ext.filter((o) => modes.includes(o.work_mode))
+    }
+    if (categories.length > 0) {
+      cs = cs.filter((o) =>
+        categories.some((cat) => (o as unknown as { category?: string }).category?.toLowerCase().includes(cat.split(' ')[0].toLowerCase()) ?? false)
+      )
+      ext = ext.filter((o) =>
+        categories.some((cat) => o.category.toLowerCase().includes(cat.split(' ')[0].toLowerCase()))
+      )
+    }
+    if (experiences.length > 0) {
       cs = cs.filter((o) => {
         const lvl = (o as unknown as { experience_level?: string }).experience_level || 'any'
-        if (experience === 'Entry Level') return lvl === 'entry' || lvl === 'any'
-        if (experience === 'Mid Level') return lvl === 'mid' || lvl === 'any'
-        if (experience === 'Senior Level') return lvl === 'senior'
-        return true
+        return experiences.some((exp) => {
+          if (exp === 'Entry Level') return lvl === 'entry' || lvl === 'any'
+          if (exp === 'Mid Level') return lvl === 'mid' || lvl === 'any'
+          if (exp === 'Senior Level') return lvl === 'senior'
+          return false
+        })
       })
-      ext = ext.filter((o) => detectExperienceFromTitle(o.title) === experience)
+      ext = ext.filter((o) => experiences.includes(detectExperienceFromTitle(o.title)))
     }
 
-    if (dateFilter > 0) {
-      const cutoff = Date.now() - dateFilter * 24 * 60 * 60 * 1000
+    // Date: OR across selected windows → effectively show if within max(selectedDays)
+    if (dateFilters.length > 0) {
+      const maxDays = Math.max(...dateFilters)
+      const cutoff = Date.now() - maxDays * 24 * 60 * 60 * 1000
       ext = ext.filter((o) => {
         const dateStr = o.posted_at || o.synced_at
         return dateStr ? new Date(dateStr).getTime() >= cutoff : true
@@ -753,7 +850,7 @@ function OpportunitiesInner() {
 
     setFilteredCanstart(cs)
     setFilteredExternal(ext)
-  }, [search, city, type, mode, category, experience, dateFilter, canstartJobs, externalJobs])
+  }, [search, cities, types, modes, categories, experiences, dateFilters, canstartJobs, externalJobs])
 
   const checkAuth = async () => {
     const { data: { user } } = await supabase.auth.getUser()
@@ -836,8 +933,8 @@ function OpportunitiesInner() {
   }
 
   const handleSearch = (val: string) => { setSearch(val); if (val.length > 2) track('opportunity_search', { query: val }) }
-  const clearFilters = () => { setCity('All Cities'); setType('All Types'); setMode('All Modes'); setCategory('All Categories'); setExperience('Any Level'); setDateFilter(0); setSearch('') }
-  const hasFilters = city !== 'All Cities' || type !== 'All Types' || mode !== 'All Modes' || category !== 'All Categories' || experience !== 'Any Level' || dateFilter > 0 || search
+  const clearFilters = () => { setCities([]); setTypes([]); setModes([]); setCategories([]); setExperiences([]); setDateFilters([]); setSearch('') }
+  const hasFilters = cities.length > 0 || types.length > 0 || modes.length > 0 || categories.length > 0 || experiences.length > 0 || dateFilters.length > 0 || !!search
 
   const formatSalary = (min?: number, max?: number) => {
     if (!min && !max) return null
@@ -886,44 +983,73 @@ function OpportunitiesInner() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-wrap gap-3 mb-8 items-center">
-          <div className="flex items-center gap-2 text-gray-500 text-sm"><SlidersHorizontal size={16} /> Filter:</div>
-          <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2">
-            <MapPin size={14} className="text-gray-400" />
-            <select value={city} onChange={(e) => setCity(e.target.value)} className="py-2 text-sm text-gray-700 focus:outline-none bg-transparent">
-              {CITIES.map((c) => <option key={c}>{c}</option>)}
-            </select>
+        <div className="flex flex-wrap gap-2 mb-8 items-center">
+          <div className="flex items-center gap-1.5 text-gray-500 text-sm font-medium">
+            <SlidersHorizontal size={15} /> Filter:
           </div>
-          <select value={experience} onChange={(e) => setExperience(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-            {EXPERIENCE_LEVELS.map((l) => <option key={l}>{l}</option>)}
-          </select>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-            {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-          </select>
+
+          <MultiSelectDropdown
+            label="Any City"
+            options={CITIES.filter((c) => c !== 'All Cities').map((c) => ({ label: c, value: c }))}
+            selected={cities}
+            onChange={setCities}
+            icon={<MapPin size={13} className="text-gray-400 flex-shrink-0" />}
+          />
+
+          <MultiSelectDropdown
+            label="Any Level"
+            options={EXPERIENCE_LEVELS.filter((l) => l !== 'Any Level').map((l) => ({ label: l, value: l }))}
+            selected={experiences}
+            onChange={setExperiences}
+          />
+
+          <MultiSelectDropdown
+            label="All Categories"
+            options={CATEGORIES.filter((c) => c !== 'All Categories').map((c) => ({ label: c, value: c }))}
+            selected={categories}
+            onChange={setCategories}
+          />
+
           {activeTab === 'canstart' && (
             <>
-              <select value={type} onChange={(e) => setType(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-                {TYPES.map((t) => <option key={t} value={t}>{t === 'All Types' ? t : t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
-              </select>
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-                {MODES.map((m) => <option key={m} value={m}>{m === 'All Modes' ? m : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
-              </select>
+              <MultiSelectDropdown
+                label="All Types"
+                options={TYPES.filter((t) => t !== 'All Types').map((t) => ({ label: t.charAt(0).toUpperCase() + t.slice(1), value: t }))}
+                selected={types}
+                onChange={setTypes}
+              />
+              <MultiSelectDropdown
+                label="All Modes"
+                options={MODES.filter((m) => m !== 'All Modes').map((m) => ({ label: m.charAt(0).toUpperCase() + m.slice(1), value: m }))}
+                selected={modes}
+                onChange={setModes}
+              />
             </>
           )}
+
           {activeTab === 'external' && (
             <>
-              <select value={mode} onChange={(e) => setMode(e.target.value)} className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none">
-                {MODES.map((m) => <option key={m} value={m}>{m === 'All Modes' ? m : m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
-              </select>
-              <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2">
-                <Calendar size={14} className="text-gray-400" />
-                <select value={dateFilter} onChange={(e) => setDateFilter(Number(e.target.value))} className="py-2 text-sm text-gray-700 focus:outline-none bg-transparent">
-                  {DATE_FILTERS.map(({ label, days }) => <option key={days} value={days}>{label}</option>)}
-                </select>
-              </div>
+              <MultiSelectDropdown
+                label="All Modes"
+                options={MODES.filter((m) => m !== 'All Modes').map((m) => ({ label: m.charAt(0).toUpperCase() + m.slice(1), value: m }))}
+                selected={modes}
+                onChange={setModes}
+              />
+              <MultiSelectDropdown
+                label="Any Date"
+                options={DATE_FILTERS.filter((d) => d.days !== 0).map((d) => ({ label: d.label, value: d.days }))}
+                selected={dateFilters}
+                onChange={setDateFilters}
+                icon={<Calendar size={13} className="text-gray-400 flex-shrink-0" />}
+              />
             </>
           )}
-          {hasFilters && <button onClick={clearFilters} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear filters</button>}
+
+          {hasFilters && (
+            <button onClick={clearFilters} className="text-sm text-red-600 hover:text-red-700 font-medium flex items-center gap-1">
+              <X size={13} /> Clear all
+            </button>
+          )}
         </div>
 
         {/* CanStart Tab */}
