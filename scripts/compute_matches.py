@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """
-Nightly match computation: seeker ↔ external-job  (stores ≥70%)
-                           candidate ↔ employer-job (stores ≥75%)
+Nightly match computation: seeker ↔ external-job  (stores ≥40 score)
+                           candidate ↔ employer-job (stores ≥50 score)
 
-Mirrors the TypeScript keywordMatcher.ts algorithm so scores are
-consistent with what users see on the Opportunities page.
+Scoring pipeline (zero external API cost):
+  1. Synonym normalisation  — "js"→"javascript", "k8s"→"kubernetes" etc.
+  2. Domain phrase extraction — "machine learning", "data science" matched
+     as single units, not split tokens.
+  3. Groq LLM keyword extraction (optional, free tier) — when GROQ_API_KEY
+     is present, richer per-job keyword sets are fetched and cached in
+     external_opportunities.extracted_keywords, replacing full-text
+     tokenisation for far more accurate scoring.
+  4. Set-intersection scoring — capped denominator + industry boost (0-30).
 """
 
+import json
 import os
 import re
-import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -50,6 +58,71 @@ SOFT_SKILLS = frozenset([
     'attention to detail','time management','teamwork','collaboration','adaptability',
     'organizational skills','interpersonal skills','written communication','verbal communication',
 ])
+
+# ── Skill synonym normalisation ───────────────────────────────────────────────
+# Maps common abbreviations / alternate spellings to a canonical form so that
+# "js" in a resume matches "javascript" in a job description and vice-versa.
+
+SKILL_SYNONYMS: dict[str, str] = {
+    # JavaScript / TypeScript
+    'js': 'javascript', 'ts': 'typescript',
+    'reactjs': 'react', 'react.js': 'react',
+    'nodejs': 'node', 'node.js': 'node',
+    'vuejs': 'vue', 'vue.js': 'vue',
+    'angularjs': 'angular',
+    'nextjs': 'next.js',
+    # Python
+    'py': 'python',
+    # Cloud
+    'gcp': 'google cloud',
+    'amazon web services': 'aws',
+    # Containers / orchestration
+    'k8s': 'kubernetes', 'kube': 'kubernetes',
+    # ML / AI
+    'ml': 'machine learning',
+    'dl': 'deep learning',
+    'ai': 'artificial intelligence',
+    'gen ai': 'generative ai',
+    'nlp': 'natural language processing',
+    'cv': 'computer vision',
+    'llm': 'large language model',
+    # Data
+    'bi': 'business intelligence',
+    'etl': 'data pipeline',
+    'powerbi': 'power bi',
+    # DevOps / CI-CD
+    'ci/cd': 'continuous integration',
+    'cicd': 'continuous integration',
+    'ci': 'continuous integration',
+    'cd': 'continuous deployment',
+    # Databases
+    'mssql': 'sql server',
+    'psql': 'postgresql',
+    'pg': 'postgresql',
+    'mongo': 'mongodb',
+    'es': 'elasticsearch',
+    'dynamo': 'dynamodb',
+    # .NET / C#
+    'dotnet': '.net',
+    'csharp': 'c#',
+    # UX / UI
+    'ux': 'user experience',
+    'ui': 'user interface',
+    # Version control
+    'gh': 'github',
+    'gl': 'gitlab',
+    # Microsoft Office
+    'ms office': 'microsoft office',
+    'msoffice': 'microsoft office',
+    'ms excel': 'excel',
+    'ms word': 'word',
+}
+
+
+def normalise(token: str) -> str:
+    """Return the canonical form of a token via SKILL_SYNONYMS."""
+    return SKILL_SYNONYMS.get(token, token)
+
 
 # ── Domain signals (mirrors TypeScript DOMAIN_SIGNALS) ────────────────────────
 
@@ -134,16 +207,47 @@ ADJACENT: dict[str, list[str]] = {
 }
 
 
+# ── Domain phrases (multi-word skills extracted as single match units) ─────────
+# Derived automatically from DOMAIN_SIGNALS so there's one source of truth.
+# These are matched as complete phrases in both resume and job text, preventing
+# "machine" + "learning" being scored as two separate weak signals.
+
+DOMAIN_PHRASES: frozenset = frozenset(
+    phrase for phrases in DOMAIN_SIGNALS.values()
+    for phrase in phrases if ' ' in phrase
+)
+# e.g. {'machine learning', 'data science', 'software engineer', 'ui design', ...}
+
+
 # ── Core matching utilities ───────────────────────────────────────────────────
 
 def tokenize(text: str) -> set:
-    """Extract significant keywords. Mirrors keywordMatcher.ts extractKeywords."""
-    words = re.split(r'[^a-z0-9#+.\-]+', text.lower())
+    """
+    Extract significant keywords + known domain phrases.
+
+    1. Split on non-alphanumeric separators.
+    2. Normalise each token via SKILL_SYNONYMS.
+    3. Filter stop-words, short tokens, and pure numbers.
+    4. Additionally scan the full text for every DOMAIN_PHRASES entry so that
+       multi-word skills like "machine learning" are treated as single units
+       and match reliably across resume↔job pairs.
+    """
+    lower = text.lower()
+
+    # ── Single tokens ──────────────────────────────────────────────────────────
+    words = re.split(r'[^a-z0-9#+.\-]+', lower)
     result = set()
     for w in words:
         clean = w.strip('.-')
+        clean = normalise(clean)          # synonym normalisation
         if len(clean) >= 3 and clean not in STOP_WORDS and not clean.isdigit():
             result.add(clean)
+
+    # ── Multi-word domain phrases ──────────────────────────────────────────────
+    for phrase in DOMAIN_PHRASES:
+        if phrase in lower:
+            result.add(phrase)
+
     return result
 
 
@@ -227,6 +331,116 @@ def compute_score(
         'matched': display_tokens(matched_tokens, 20),
         'missing': display_tokens(missing_tokens, 20),
     }
+
+
+# ── Groq LLM keyword extraction (free tier, optional) ────────────────────────
+# When GROQ_API_KEY is set, each job gets 10-20 focused skill keywords extracted
+# by llama-3.3-70b instead of using the full-text tokeniser.  These are cached
+# in external_opportunities.extracted_keywords so subsequent runs are instant.
+#
+# Free tier limits: 14 400 req/day, 100 RPM — plenty for a nightly job.
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_RPM_DELAY = 0.65   # seconds between requests → ≤92 RPM
+
+
+def extract_keywords_groq(job: dict) -> list[str]:
+    """
+    Call Groq to extract 10-20 specific skill/tool keywords for a job.
+    Returns empty list on any failure so callers can fall back to tokenisation.
+    """
+    title = (job.get('title') or '')
+    desc  = (job.get('description') or '')[:2000]
+    prompt = (
+        f"Job title: {title}\nJob description:\n{desc}\n\n"
+        "Extract 10-20 specific technical skills, tools, and domain keywords from this job posting. "
+        "Return ONLY a JSON array of strings — no explanation, no markdown. "
+        "Example: [\"Python\", \"SQL\", \"machine learning\", \"AWS\", \"Agile\"]"
+    )
+    try:
+        r = requests.post(
+            GROQ_API_URL,
+            json={
+                "model": GROQ_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 300,
+            },
+            headers={
+                "Authorization": f"Bearer {GROQ_KEY}",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+        )
+        if r.status_code == 200:
+            content = r.json()["choices"][0]["message"]["content"].strip()
+            # Strip markdown code fences if present
+            content = re.sub(r'^```[a-z]*\n?|```$', '', content, flags=re.MULTILINE).strip()
+            kws = json.loads(content)
+            if isinstance(kws, list):
+                return [str(k).strip().lower() for k in kws if k][:20]
+        elif r.status_code == 429:
+            # Rate limited — back off and skip this job for now
+            time.sleep(5)
+    except Exception as e:
+        pass   # fall back to tokenisation silently
+    return []
+
+
+def cache_job_keywords(job_id: str, keywords: list[str]) -> None:
+    """Persist extracted_keywords back to external_opportunities."""
+    requests.patch(
+        f"{BASE}/external_opportunities?id=eq.{job_id}",
+        json={"extracted_keywords": keywords},
+        headers=HEADERS,
+        timeout=10,
+    )
+
+
+def get_job_token_set(job: dict) -> set:
+    """
+    Return the token set to use for scoring.
+
+    Priority:
+      1. Cached LLM keywords (extracted_keywords column) — most accurate.
+      2. Fresh Groq extraction (if GROQ_API_KEY present) — fetched + cached.
+      3. Full-text tokenisation fallback.
+    """
+    cached = job.get('extracted_keywords')
+    if cached and isinstance(cached, list) and len(cached) >= 3:
+        # Normalise cached LLM keywords the same way we normalise resume tokens
+        normalised = set()
+        for kw in cached:
+            tok = normalise(kw.lower().strip())
+            if tok:
+                normalised.add(tok)
+            # Also add domain phrases contained in the keyword string
+            for phrase in DOMAIN_PHRASES:
+                if phrase in kw.lower():
+                    normalised.add(phrase)
+        return normalised - SOFT_SKILLS
+
+    full = ((job.get('title') or '') + ' ' + (job.get('description') or '')).lower()
+    tokens = tokenize(full) - SOFT_SKILLS
+
+    # Optionally enrich with Groq (rate-limited)
+    if GROQ_KEY:
+        kws = extract_keywords_groq(job)
+        if kws:
+            cache_job_keywords(job['id'], kws)
+            groq_tokens = set()
+            for kw in kws:
+                tok = normalise(kw.strip())
+                groq_tokens.add(tok)
+                for phrase in DOMAIN_PHRASES:
+                    if phrase in kw:
+                        groq_tokens.add(phrase)
+            return (groq_tokens - SOFT_SKILLS) or tokens
+        time.sleep(GROQ_RPM_DELAY)
+
+    return tokens
 
 
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
@@ -321,9 +535,14 @@ def main() -> None:
 
     ext_jobs = fetch_all(
         'external_opportunities',
-        {'select': 'id,title,description,category,work_mode,city'},
+        {'select': 'id,title,description,category,work_mode,city,extracted_keywords'},
     )
     print(f"  External jobs: {len(ext_jobs)}")
+    cached_count = sum(1 for j in ext_jobs if j.get('extracted_keywords'))
+    if GROQ_KEY:
+        print(f"  LLM keywords cached: {cached_count}/{len(ext_jobs)} jobs (remaining will be fetched via Groq)")
+    else:
+        print(f"  LLM keywords cached: {cached_count}/{len(ext_jobs)} jobs (set GROQ_API_KEY to enable Groq enrichment)")
 
     open_opps = fetch_all(
         'opportunities',
@@ -331,10 +550,14 @@ def main() -> None:
     )
     print(f"  Open CanStart opportunities: {len(open_opps)}")
 
-    # Pre-tokenize job texts
+    # Pre-tokenize job texts (uses LLM keywords when cached, Groq when key present, else full-text)
+    groq_fetched = 0
     for job in ext_jobs:
-        full = ((job.get('title') or '') + ' ' + (job.get('description') or '')).lower()
-        job['_tokens'] = tokenize(full) - SOFT_SKILLS
+        job['_tokens'] = get_job_token_set(job)
+        if GROQ_KEY and not job.get('extracted_keywords'):
+            groq_fetched += 1
+    if groq_fetched:
+        print(f"  Groq enriched: {groq_fetched} new jobs")
 
     for opp in open_opps:
         full = (

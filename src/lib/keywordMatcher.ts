@@ -1,7 +1,84 @@
 /**
  * Keyword extraction and matching utilities — adapted from Resume-Matcher (Apache 2.0)
- * Enhanced with word-boundary matching and multi-word phrase support.
+ * Enhanced with word-boundary matching, multi-word phrase support,
+ * skill synonym normalisation, and domain phrase extraction.
+ *
+ * Mirrors compute_matches.py so live-page scores stay consistent with
+ * the nightly batch results.
  */
+
+// ── Skill synonym normalisation ───────────────────────────────────────────────
+// Maps abbreviations / alternate spellings → canonical form.
+const SKILL_SYNONYMS: Record<string, string> = {
+  js: 'javascript', ts: 'typescript',
+  reactjs: 'react', 'react.js': 'react',
+  nodejs: 'node', 'node.js': 'node',
+  vuejs: 'vue', 'vue.js': 'vue',
+  angularjs: 'angular',
+  nextjs: 'next.js',
+  py: 'python',
+  gcp: 'google cloud',
+  'amazon web services': 'aws',
+  k8s: 'kubernetes', kube: 'kubernetes',
+  ml: 'machine learning',
+  dl: 'deep learning',
+  ai: 'artificial intelligence',
+  'gen ai': 'generative ai',
+  nlp: 'natural language processing',
+  cv: 'computer vision',
+  llm: 'large language model',
+  bi: 'business intelligence',
+  etl: 'data pipeline',
+  powerbi: 'power bi',
+  'ci/cd': 'continuous integration',
+  cicd: 'continuous integration',
+  mssql: 'sql server',
+  psql: 'postgresql', pg: 'postgresql',
+  mongo: 'mongodb',
+  dotnet: '.net', csharp: 'c#',
+  ux: 'user experience', ui: 'user interface',
+  gh: 'github', gl: 'gitlab',
+  'ms office': 'microsoft office', msoffice: 'microsoft office',
+}
+
+function normalise(token: string): string {
+  return SKILL_SYNONYMS[token] ?? token
+}
+
+// ── Known multi-word domain phrases ──────────────────────────────────────────
+// Matched as complete phrases so "machine learning" scores as one strong signal
+// rather than two weak individual tokens.
+const DOMAIN_PHRASES: string[] = [
+  // Tech
+  'machine learning','deep learning','artificial intelligence','natural language processing',
+  'computer vision','data science','data engineering','software engineer','software developer',
+  'full stack','frontend developer','backend developer','mobile developer',
+  'devops engineer','cloud engineer','data analyst','business intelligence',
+  'continuous integration','continuous deployment','large language model',
+  // Marketing
+  'digital marketing','content marketing','social media marketing','email marketing',
+  'brand management','content strategy','google analytics','google ads','facebook ads',
+  'public relations','media relations','a/b testing',
+  // Finance
+  'financial modeling','accounts payable','accounts receivable','financial analyst',
+  // HR
+  'talent acquisition','human resources','employee relations','workforce planning',
+  'benefits administration','talent management','performance management',
+  'labour relations','organizational development',
+  // Sales
+  'business development','account executive','account manager','lead generation',
+  'b2b sales','b2c sales','revenue target','client acquisition',
+  // Data
+  'data analysis','data warehouse','power bi','sql server','big data',
+  // Ops
+  'supply chain','inventory management','operations manager','quality assurance',
+  'process improvement','six sigma','vendor management',
+  // Design
+  'graphic design','ui design','ux design','product design','web design',
+  'user experience','user interface','motion graphics',
+  // Project management
+  'project management','agile methodology','scrum master','product owner',
+]
 
 // Stop words to filter out during tokenization
 const STOP_WORDS = new Set([
@@ -29,18 +106,32 @@ const STOP_WORDS = new Set([
 const MIN_WORD_LENGTH = 3
 
 /**
- * Tokenize text into a Set of significant lowercase words.
- * Filters stop words, short words, and pure numbers.
+ * Tokenize text into a Set of significant lowercase keywords.
+ *
+ * 1. Split on non-alphanumeric separators.
+ * 2. Normalise each token via SKILL_SYNONYMS (e.g. "js" → "javascript").
+ * 3. Filter stop-words, short tokens, and pure numbers.
+ * 4. Additionally scan full text for DOMAIN_PHRASES so multi-word skills
+ *    like "machine learning" are treated as one match unit.
  */
 export function extractKeywords(text: string): Set<string> {
+  const lower = text.toLowerCase()
   const keywords = new Set<string>()
-  const words = text.toLowerCase().split(/[^a-z0-9#+.-]+/)
+
+  // Single tokens
+  const words = lower.split(/[^a-z0-9#+.-]+/)
   for (const word of words) {
-    const clean = word.replace(/^[.\-]+|[.\-]+$/g, '')
+    const clean = normalise(word.replace(/^[.\-]+|[.\-]+$/g, ''))
     if (clean.length >= MIN_WORD_LENGTH && !STOP_WORDS.has(clean) && !/^\d+$/.test(clean)) {
       keywords.add(clean)
     }
   }
+
+  // Multi-word domain phrases
+  for (const phrase of DOMAIN_PHRASES) {
+    if (lower.includes(phrase)) keywords.add(phrase)
+  }
+
   return keywords
 }
 
@@ -49,7 +140,7 @@ export function extractKeywords(text: string): Set<string> {
  * Uses word-boundary regex so "SQL" won't match "MySQL", "Java" won't match "JavaScript".
  */
 export function matchesKeyword(resumeText: string, keyword: string): boolean {
-  const lower = keyword.toLowerCase()
+  const lower = normalise(keyword.toLowerCase())
   // Escape special regex characters
   const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
