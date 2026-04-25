@@ -30,6 +30,7 @@ def upsert_batch(records: list) -> tuple[int, str | None]:
     resp = requests.post(
         TABLE_URL,
         json=records,
+        params={"on_conflict": "source,external_id"},
         headers={**HEADERS, "Prefer": "resolution=merge-duplicates,return=minimal"},
         timeout=30,
     )
