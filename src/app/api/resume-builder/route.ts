@@ -91,65 +91,71 @@ ratingReasons: 2–3 short sentences about the candidate's actual background and
 matchGaps: 2–4 specific things the JD requires that the candidate lacks. Be concrete. Empty array [] if match >90%.
 trainingRecommendations: One specific named course/cert per gap (e.g. "Google Project Management Certificate on Coursera"). Empty array [] if no gaps.`
 
-type LLMProvider = 'groq' | 'gemini'
+type LLMProvider = 'groq' | 'gemini' | 'cerebras'
 
-async function callLLM(messages: object[], maxTokens: number, provider: LLMProvider): Promise<Response> {
-  if (provider === 'groq') {
-    return fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: maxTokens,
-        temperature: 0.4,
-        messages,
-      }),
-    })
-  } else {
-    // Gemini via OpenAI-compatible endpoint — free tier: 1M TPM
-    return fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gemini-2.0-flash',
-        max_tokens: maxTokens,
-        temperature: 0.4,
-        messages,
-      }),
-    })
-  }
+interface ProviderConfig {
+  name: LLMProvider
+  url: string
+  model: string
+  key: string
 }
 
-async function callWithFallback(messages: object[], maxTokens: number): Promise<{ res: Response; provider: LLMProvider }> {
-  const hasGroq = !!process.env.GROQ_API_KEY
-  const hasGemini = !!process.env.GEMINI_API_KEY
+function getAvailableProviders(): ProviderConfig[] {
+  const providers: ProviderConfig[] = []
+  if (process.env.GROQ_API_KEY) {
+    providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', key: process.env.GROQ_API_KEY })
+  }
+  if (process.env.GEMINI_API_KEY) {
+    providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
+  }
+  if (process.env.CEREBRAS_API_KEY) {
+    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama-3.3-70b', key: process.env.CEREBRAS_API_KEY })
+  }
+  return providers
+}
 
-  // Try Groq first
-  if (hasGroq) {
-    const res = await callLLM(messages, maxTokens, 'groq')
-    if (res.status !== 429) return { res, provider: 'groq' }
-    console.warn('Groq rate limited (429) — falling back to Gemini')
+async function callLLM(messages: object[], maxTokens: number, provider: ProviderConfig): Promise<Response> {
+  return fetch(provider.url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${provider.key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: provider.model,
+      max_tokens: maxTokens,
+      temperature: 0.4,
+      messages,
+    }),
+  })
+}
+
+async function callWithFallback(messages: object[], maxTokens: number): Promise<{ res: Response; provider: string }> {
+  const available = getAvailableProviders()
+  if (available.length === 0) {
+    throw new Error('No AI provider keys configured.')
   }
 
-  // Fall back to Gemini on Groq 429 or if Groq key missing
-  if (hasGemini) {
-    const res = await callLLM(messages, maxTokens, 'gemini')
-    return { res, provider: 'gemini' }
+  // Shuffle providers so load is distributed randomly across requests
+  const shuffled = available.sort(() => Math.random() - 0.5)
+
+  for (const provider of shuffled) {
+    const res = await callLLM(messages, maxTokens, provider)
+    if (res.status !== 429) {
+      console.log(`Resume built via ${provider.name}`)
+      return { res, provider: provider.name }
+    }
+    console.warn(`${provider.name} rate limited (429) — trying next provider`)
   }
 
-  throw new Error('No AI provider available. Set GROQ_API_KEY and/or GEMINI_API_KEY.')
+  // All providers returned 429
+  throw new Error('ALL_RATE_LIMITED')
 }
 
 export async function POST(request: Request) {
   try {
-    if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
-      console.error('No AI provider keys configured (GROQ_API_KEY or GEMINI_API_KEY)')
+    if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY && !process.env.CEREBRAS_API_KEY) {
+      console.error('No AI provider keys configured')
       return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
     }
 
@@ -205,24 +211,26 @@ export async function POST(request: Request) {
     ]
 
     let aiRes: Response
-    let provider: LLMProvider
+    let providerName: string
     try {
-      ;({ res: aiRes, provider } = await callWithFallback(messages, 6000))
+      ;({ res: aiRes, provider: providerName } = await callWithFallback(messages, 6000))
     } catch (e) {
-      console.error('All AI providers failed:', e)
+      const msg = e instanceof Error ? e.message : ''
+      if (msg === 'ALL_RATE_LIMITED') {
+        console.warn('All providers rate limited simultaneously')
+        return NextResponse.json({
+          error: 'AI services are under heavy load right now. Please try again in 1–2 minutes.'
+        }, { status: 429 })
+      }
+      console.error('No AI providers configured:', e)
       return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
     }
 
     if (!aiRes.ok) {
       const err = await aiRes.text()
-      console.error(`${provider} API error:`, aiRes.status, err)
-      if (aiRes.status === 429) {
-        return NextResponse.json({
-          error: 'Both AI services are currently busy. Please wait a minute and try again.'
-        }, { status: 429 })
-      }
+      console.error(`${providerName} API error:`, aiRes.status, err)
       if (aiRes.status === 401) {
-        return NextResponse.json({ error: 'Resume builder configuration error. Please contact support.' }, { status: 500 })
+        return NextResponse.json({ error: `AI provider (${providerName}) authentication failed. Please contact support.` }, { status: 500 })
       }
       return NextResponse.json({ error: 'AI service error. Please try again in a few seconds.' }, { status: 500 })
     }
@@ -231,7 +239,7 @@ export async function POST(request: Request) {
     const raw = aiData.choices?.[0]?.message?.content || ''
 
     if (!raw) {
-      console.error(`Empty response from ${provider}. finish_reason:`, aiData.choices?.[0]?.finish_reason)
+      console.error(`Empty response from ${providerName}. finish_reason:`, aiData.choices?.[0]?.finish_reason)
       return NextResponse.json({ error: 'No response from AI. Please try again.' }, { status: 500 })
     }
 
