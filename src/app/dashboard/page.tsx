@@ -236,52 +236,18 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-500 mb-4">
                   {pickedJobs.length} job{pickedJobs.length !== 1 ? 's' : ''} selected based on your resume skills · refreshed daily at 5:30 AM
                 </p>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {pickedJobs.map((pick) => {
                     const job = pick.external_opportunities
                     if (!job) return null
-                    const matched = pick.matched_keywords ?? []
-                    const missing = pick.missing_keywords ?? []
                     return (
                       <Link
                         key={pick.job_id}
                         href={`/jobs/${job.id}`}
-                        className="block p-3.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
+                        className="flex items-center justify-between px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-gray-900 text-sm truncate">{job.title}</p>
-                            <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                              {job.company}
-                              <span className="text-gray-300">·</span>
-                              <MapPin size={10} className="inline" />{job.city}
-                              <span className="text-gray-300">·</span>
-                              <span className="capitalize">{job.work_mode}</span>
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <MatchBattery score={pick.match_score} />
-                            <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
-                          </div>
-                        </div>
-                        {/* Recruiter reason (LLM) */}
-                        {pick.match_reason && (
-                          <p className="mt-2 text-xs text-gray-500 italic">{pick.match_reason}</p>
-                        )}
-                        {/* Keyword breakdown */}
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {matched.slice(0, 5).map(kw => (
-                            <span key={kw} className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {kw}</span>
-                          ))}
-                          {missing.slice(0, 3).map(kw => (
-                            <span key={kw} className="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-500 font-medium">+ {kw}</span>
-                          ))}
-                          {(matched.length > 5 || missing.length > 3) && (
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
-                              {matched.length} matched · {missing.length} to add →
-                            </span>
-                          )}
-                        </div>
+                        <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
+                        <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors flex-shrink-0 ml-2" />
                       </Link>
                     )
                   })}
