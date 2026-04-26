@@ -9,7 +9,7 @@ jobs:
   compute:
     name: Compute seeker & employer match scores
     runs-on: ubuntu-latest
-    timeout-minutes: 45   # first run fetches Groq keywords for all jobs (~18 min); subsequent runs ~30 s
+    timeout-minutes: 20   # Groq enrichment capped at 100 jobs/run (~3 min); scoring ~30 s
 
     steps:
       - name: Checkout repository

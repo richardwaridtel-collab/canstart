@@ -343,7 +343,10 @@ def compute_score(
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_RPM_DELAY = 0.65   # seconds between requests → ≤92 RPM
+GROQ_RPM_DELAY = 0.65        # seconds between requests → ≤92 RPM
+GROQ_MAX_PER_RUN = 100       # enrich at most 100 uncached jobs per nightly run
+                              # (~3 min overhead). All 1671 jobs reach full LLM
+                              # coverage after ~17 nights automatically.
 
 
 def extract_keywords_groq(job: dict) -> list[str]:
@@ -399,48 +402,65 @@ def cache_job_keywords(job_id: str, keywords: list[str]) -> None:
     )
 
 
+def llm_keywords_to_tokens(kws: list[str]) -> set:
+    """Normalise a list of LLM-returned keyword strings into a scoring token set."""
+    result = set()
+    for kw in kws:
+        tok = normalise(kw.lower().strip())
+        if tok:
+            result.add(tok)
+        for phrase in DOMAIN_PHRASES:
+            if phrase in kw.lower():
+                result.add(phrase)
+    return result - SOFT_SKILLS
+
+
+def enrich_jobs_with_groq(jobs: list[dict]) -> int:
+    """
+    Fetch Groq LLM keywords for up to GROQ_MAX_PER_RUN uncached jobs and
+    persist them.  Returns the number of jobs newly enriched.
+
+    Keeping enrichment in a single pre-pass (not inside the scoring loop)
+    makes the time budget predictable: 100 jobs × ~2 s = ~3 extra minutes,
+    regardless of how many seekers or matches exist.
+    """
+    if not GROQ_KEY:
+        return 0
+
+    uncached = [j for j in jobs if not j.get('extracted_keywords')]
+    to_enrich = uncached[:GROQ_MAX_PER_RUN]
+    if not to_enrich:
+        return 0
+
+    print(f"  Groq enriching {len(to_enrich)} jobs "
+          f"({len(uncached) - len(to_enrich)} remain for future runs)…")
+
+    enriched = 0
+    for job in to_enrich:
+        kws = extract_keywords_groq(job)
+        if kws:
+            cache_job_keywords(job['id'], kws)
+            job['extracted_keywords'] = kws   # update in-memory so scorer uses it now
+            enriched += 1
+        time.sleep(GROQ_RPM_DELAY)
+
+    return enriched
+
+
 def get_job_token_set(job: dict) -> set:
     """
     Return the token set to use for scoring.
 
     Priority:
       1. Cached LLM keywords (extracted_keywords column) — most accurate.
-      2. Fresh Groq extraction (if GROQ_API_KEY present) — fetched + cached.
-      3. Full-text tokenisation fallback.
+      2. Full-text tokenisation fallback (synonyms + domain phrases applied).
     """
     cached = job.get('extracted_keywords')
     if cached and isinstance(cached, list) and len(cached) >= 3:
-        # Normalise cached LLM keywords the same way we normalise resume tokens
-        normalised = set()
-        for kw in cached:
-            tok = normalise(kw.lower().strip())
-            if tok:
-                normalised.add(tok)
-            # Also add domain phrases contained in the keyword string
-            for phrase in DOMAIN_PHRASES:
-                if phrase in kw.lower():
-                    normalised.add(phrase)
-        return normalised - SOFT_SKILLS
+        return llm_keywords_to_tokens(cached)
 
     full = ((job.get('title') or '') + ' ' + (job.get('description') or '')).lower()
-    tokens = tokenize(full) - SOFT_SKILLS
-
-    # Optionally enrich with Groq (rate-limited)
-    if GROQ_KEY:
-        kws = extract_keywords_groq(job)
-        if kws:
-            cache_job_keywords(job['id'], kws)
-            groq_tokens = set()
-            for kw in kws:
-                tok = normalise(kw.strip())
-                groq_tokens.add(tok)
-                for phrase in DOMAIN_PHRASES:
-                    if phrase in kw:
-                        groq_tokens.add(phrase)
-            return (groq_tokens - SOFT_SKILLS) or tokens
-        time.sleep(GROQ_RPM_DELAY)
-
-    return tokens
+    return tokenize(full) - SOFT_SKILLS
 
 
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
@@ -550,14 +570,14 @@ def main() -> None:
     )
     print(f"  Open CanStart opportunities: {len(open_opps)}")
 
-    # Pre-tokenize job texts (uses LLM keywords when cached, Groq when key present, else full-text)
-    groq_fetched = 0
+    # Optional Groq pre-pass — enriches up to 100 uncached jobs before scoring
+    newly_enriched = enrich_jobs_with_groq(ext_jobs)
+    if newly_enriched:
+        print(f"  ✓ Groq enriched {newly_enriched} jobs this run")
+
+    # Pre-tokenize job texts (uses LLM keywords when cached, else full-text tokeniser)
     for job in ext_jobs:
         job['_tokens'] = get_job_token_set(job)
-        if GROQ_KEY and not job.get('extracted_keywords'):
-            groq_fetched += 1
-    if groq_fetched:
-        print(f"  Groq enriched: {groq_fetched} new jobs")
 
     for opp in open_opps:
         full = (
