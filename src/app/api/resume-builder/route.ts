@@ -59,7 +59,12 @@ BULLET RULES:
 4. 15–22 words per bullet. Tight and specific.
 5. Plain direct language. NEVER use: ${BANNED_WORDS.join(', ')}
 
-BULLETS PER ROLE: Role 1 = 6 bullets · Roles 2–3 = 5 bullets each · Role 4+ = 3 bullets each
+BULLETS PER ROLE:
+- Most recent role = 6 bullets
+- Roles 2–3 = 5 bullets each
+- Role 4+ = 3 bullets each
+- Any role that ended more than 10 years before the current year = MAXIMUM 2 bullets, regardless of position number
+The current year is provided in the user message. Use the role's end date (or start date if no end date) to decide. When in doubt, apply the 2-bullet cap — it is better to be concise on old roles than to run out of space for education and skills.
 
 === APPROVED VERBS ===
 Managed, Built, Led, Ran, Set up, Tracked, Directed, Negotiated, Coordinated, Scoped,
@@ -118,15 +123,17 @@ INVALID (fabrication — never do this):
 4. Do NOT insert JD tool names the candidate has not listed or demonstrated.
 
 === OUTPUT — VALID JSON ONLY, NO MARKDOWN ===
+IMPORTANT: Generate the JSON keys in EXACTLY this order. Education, certifications, and tools come FIRST — before experience — so they are never cut off.
+
 {
   "contact": { "name": "FULL NAME IN CAPS", "city": "City", "province": "Province", "phone": "phone or null", "email": "email or null", "linkedin": "linkedin.com/in/handle or null" },
   "summary": "2-3 sentence third-person professional summary",
+  "education": [{ "degree": "Degree Name", "institution": "School Name", "location": "City, Country", "year": "Year" }],
+  "certifications": ["cert1"] or null,
+  "tools": ["tool1"] or null,
   "competencies": ["Title Case Skill 1", "Title Case Skill 2"],
   "competencyCount": 9,
   "experience": [{ "title": "Job Title", "company": "Company Name", "location": "City, Province", "dates": "Mon Year – Mon Year", "bullets": ["bullet1"] }],
-  "certifications": ["cert1"] or null,
-  "tools": ["tool1"] or null,
-  "education": [{ "degree": "Degree Name", "institution": "School Name", "year": "Year" }] or null,
   "scores": {
     "resumeRating": 7,
     "matchPercentage": 78,
@@ -138,11 +145,11 @@ INVALID (fabrication — never do this):
 
 CONTACT: Name must be in ALL CAPS. LinkedIn: output as linkedin.com/in/handle (no https://). Missing fields = null.
 
-EDUCATION: Include EVERY degree and diploma from the original resume — MBA, BBA, BSc, BA, diplomas — all of them. Include institution, year, and location. Never omit a degree. For non-Canadian credentials add "(Canadian Equivalent)" note where appropriate.
+EDUCATION: Must be the FIRST data section after summary. Include EVERY degree and diploma — MBA, BBA, BSc, BA, diplomas — all of them. Include institution, location, and year. Never omit a degree. For non-Canadian credentials add "(Canadian Equivalent)" note.
 
-CERTIFICATIONS: Include EVERY certification listed in the original resume. Never drop one. If none exist, output null.
+CERTIFICATIONS: List EVERY certification from the original resume. Never drop one. If none, output null.
 
-TOOLS: ONLY include tools the candidate explicitly listed in their original resume. If their resume has no tools section and mentions no specific software, output "tools": null — do NOT populate it with JD tools, assumed software, or guesses.
+TOOLS: ONLY include tools the candidate explicitly listed in their resume. If their resume has no tools, output null — do NOT guess or add JD tools.
 
 SCORES — be strict and honest:
 
@@ -195,6 +202,32 @@ interface ProviderConfig {
   model: string
   key: string
   extraHeaders?: Record<string, string>
+}
+
+/**
+ * Extracts up to 800 chars of the section(s) matching any of the given keywords from resume text.
+ * Used to create an explicit preservation hint sent alongside the resume to the AI.
+ */
+function extractSection(text: string, keywords: string[]): string {
+  const lines = text.split('\n')
+  const result: string[] = []
+  let capturing = false
+  let linesAfterHeader = 0
+
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase()
+    const isHeader = keywords.some(kw => lower.includes(kw)) && lines[i].trim().length < 60
+    if (isHeader) { capturing = true; linesAfterHeader = 0 }
+    if (capturing) {
+      result.push(lines[i])
+      linesAfterHeader++
+      // Stop after 25 lines or when we hit the next section header (all-caps short line)
+      const nextIsHeader = i + 1 < lines.length && lines[i + 1].trim().length < 60 &&
+        lines[i + 1].trim() === lines[i + 1].trim().toUpperCase() && lines[i + 1].trim().length > 3
+      if ((linesAfterHeader > 25 || nextIsHeader) && linesAfterHeader > 2) { capturing = false }
+    }
+  }
+  return result.join('\n').slice(0, 800).trim()
 }
 
 function getAvailableProviders(): ProviderConfig[] {
@@ -341,8 +374,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Could not extract text from the resume. Please try a different file or paste the text instead.' }, { status: 400 })
     }
 
-    // Cap inputs to control token usage and avoid rate limits
-    const resumeTextTrimmed = resumeText.slice(0, 6000)
+    // Cap inputs — 8000 chars covers even long resumes without hitting LLM context limits
+    const resumeTextTrimmed = resumeText.slice(0, 8000)
     const jobDescTrimmed = jobDescription.slice(0, 4000)
 
     // Score-only mode: fast evaluation of existing resume, no rewriting
@@ -389,19 +422,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ scores })
     }
 
+    // Pre-extract education, certifications, and tools so the AI cannot miss them
+    const educationHint   = extractSection(resumeTextTrimmed, ['education', 'academic', 'qualification'])
+    const certHint        = extractSection(resumeTextTrimmed, ['certification', 'certificate', 'licence', 'license', 'training'])
+    const toolsHint       = extractSection(resumeTextTrimmed, ['tools', 'software', 'technologies', 'technical skills', 'proficiencies', 'skills'])
+
+    const preservationNote = [
+      educationHint && `EDUCATION FOUND IN RESUME (must all appear in output):\n${educationHint}`,
+      certHint      && `CERTIFICATIONS FOUND IN RESUME (must all appear in output):\n${certHint}`,
+      toolsHint     && `TOOLS/SKILLS FOUND IN RESUME (must all appear in output):\n${toolsHint}`,
+    ].filter(Boolean).join('\n\n')
+
     // Full mode: generate complete tailored resume
     const messages = [
       { role: 'system', content: RESUME_PROMPT },
       {
         role: 'user',
-        content: `=== CANDIDATE'S RESUME ===\n${resumeTextTrimmed}\n\n=== JOB DESCRIPTION ===\n${jobDescTrimmed}\n\nReturn the tailored resume as valid JSON only.`,
+        content: `Current year: ${new Date().getFullYear()}\n\n=== CANDIDATE'S RESUME ===\n${resumeTextTrimmed}\n\n=== JOB DESCRIPTION ===\n${jobDescTrimmed}${preservationNote ? `\n\n=== MUST PRESERVE — DO NOT DROP ===\n${preservationNote}` : ''}\n\nReturn the tailored resume as valid JSON only. Generate education, certifications, and tools BEFORE experience in the JSON.`,
       },
     ]
 
     let aiRes: Response
     let providerName: string
     try {
-      ;({ res: aiRes, provider: providerName } = await callWithFallback(messages, 6000))
+      ;({ res: aiRes, provider: providerName } = await callWithFallback(messages, 8000))
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
       if (msg.startsWith('ALL_RATE_LIMITED')) {
