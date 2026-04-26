@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 
 type ResumeExperience = { title: string; company: string; location: string; dates: string; bullets: string[] }
-type ResumeEducation  = { degree: string; institution: string; year: string }
+type ResumeEducation  = { degree: string; institution: string; location?: string; year: string }
 type ResumeContact    = { name: string; city: string | null; province: string | null; phone: string | null; email: string | null; linkedin: string | null }
 type ResumeScores     = { resumeRating: number; matchPercentage: number; ratingReasons: string[]; matchGaps: string[]; trainingRecommendations: string[] }
 type GeneratedResume  = {
@@ -161,7 +161,7 @@ export default function ResumeBuilderPage() {
     }
     if (resume.education?.length) {
       lines.push('EDUCATION', '─'.repeat(60))
-      resume.education.forEach((e) => lines.push(`${e.degree} — ${e.institution}${e.year ? ` (${e.year})` : ''}`))
+      resume.education.forEach((e) => lines.push(`${e.degree} — ${e.institution}${e.location ? `, ${e.location}` : ''}${e.year ? ` (${e.year})` : ''}`))
     }
     return lines.join('\n')
   }
@@ -218,7 +218,7 @@ export default function ResumeBuilderPage() {
       resume.education.forEach((e) => {
         checkPage(10); doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.text(e.degree, margin, y); y += 5
         doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(80)
-        doc.text(`${e.institution}${e.year ? ` (${e.year})` : ''}`, margin, y); doc.setTextColor(0); y += 6
+        doc.text(`${e.institution}${e.location ? `, ${e.location}` : ''}${e.year ? ` (${e.year})` : ''}`, margin, y); doc.setTextColor(0); y += 6
       })
     }
     const fn = resume.contact?.name ? resume.contact.name.replace(/\s+/g, '_') : 'Resume'
@@ -270,7 +270,7 @@ export default function ResumeBuilderPage() {
       push(sp('Education'))
       resume.education.forEach((e) => {
         push(new Paragraph({ spacing: { before: 80, after: 40 }, children: [new TextRun({ text: e.degree, bold: true, size: 20, font: 'Calibri', color: BLACK })] }))
-        push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: `${e.institution}${e.year ? ` (${e.year})` : ''}`, size: 18, font: 'Calibri', color: GRAY })] }))
+        push(new Paragraph({ spacing: { after: 80 }, children: [new TextRun({ text: `${e.institution}${e.location ? `, ${e.location}` : ''}${e.year ? ` (${e.year})` : ''}`, size: 18, font: 'Calibri', color: GRAY })] }))
       })
     }
     const doc = new Document({ sections: [{ properties: {}, children: ch }] })
@@ -447,12 +447,18 @@ export default function ResumeBuilderPage() {
                 <div className="h-2 bg-gray-200 rounded-full mb-4 overflow-hidden">
                   <div className={`h-full rounded-full ${ratingBg(scores.resumeRating)}`} style={{ width: `${scores.resumeRating * 10}%` }} />
                 </div>
-                {scores.ratingReasons?.map((r, i) => (
-                  <div key={i} className="flex items-start gap-2 text-xs text-gray-600 mb-1.5">
-                    <CheckCircle size={12} className="text-green-500 flex-shrink-0 mt-0.5" />
-                    <span>{r}</span>
-                  </div>
-                ))}
+                {scores.ratingReasons?.map((r, i) => {
+                  const isWeakness = /\b(lacks?|missing|no mention|not explicitly|limited|without|gap|weak|unclear|no direct|not demonstrated|absent|no evidence|doesn't|does not|no \w+ experience)\b/i.test(r)
+                  return (
+                    <div key={i} className={`flex items-start gap-2 text-xs mb-1.5 ${isWeakness ? 'text-orange-700' : 'text-gray-600'}`}>
+                      {isWeakness
+                        ? <AlertCircle size={12} className="text-orange-400 flex-shrink-0 mt-0.5" />
+                        : <CheckCircle  size={12} className="text-green-500 flex-shrink-0 mt-0.5" />
+                      }
+                      <span>{r}</span>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Job match */}
@@ -729,7 +735,7 @@ export default function ResumeBuilderPage() {
                     {resume.education.map((e, i) => (
                       <div key={i} className="text-sm text-gray-700">
                         <span className="font-semibold">{e.degree}</span>
-                        <span className="text-gray-500"> — {e.institution}{e.year ? ` (${e.year})` : ''}</span>
+                        <span className="text-gray-500"> — {e.institution}{e.location ? `, ${e.location}` : ''}{e.year ? ` (${e.year})` : ''}</span>
                       </div>
                     ))}
                   </div>
