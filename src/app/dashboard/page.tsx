@@ -18,11 +18,55 @@ type PickedJob = {
   missing_keywords: string[]
   match_reason?: string | null
   external_opportunities: {
-    id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string; salary_min?: number; salary_max?: number
+    id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string; salary_min?: number; salary_max?: number; description?: string
   } | null
 }
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
 
+
+function extractSalary(salaryMin?: number, salaryMax?: number, description?: string): string | null {
+  // 1. Use structured DB fields if present
+  if (salaryMin && salaryMax) return `$${Math.round(salaryMin / 1000)}K–$${Math.round(salaryMax / 1000)}K/yr`
+  if (salaryMin) return `$${Math.round(salaryMin / 1000)}K+/yr`
+
+  // 2. Fallback: parse salary from description text
+  if (!description) return null
+  const text = description.slice(0, 1500)
+
+  // Annual range: $60,000 - $80,000 or $60K - $80K
+  const annualRange = text.match(/\$\s?([\d,]+\.?\d*)\s*[Kk]?\s*[-–—to]+\s*\$?\s*([\d,]+\.?\d*)\s*[Kk]?\s*(?:\/?\s*(?:year|yr|annual|annually))?/i)
+  if (annualRange) {
+    let lo = parseFloat(annualRange[1].replace(/,/g, ''))
+    let hi = parseFloat(annualRange[2].replace(/,/g, ''))
+    if (/K/i.test(annualRange[0]) || (lo < 500 && hi < 500)) { lo *= 1000; hi *= 1000 }
+    if (lo >= 20000) return `$${Math.round(lo / 1000)}K–$${Math.round(hi / 1000)}K/yr`
+  }
+
+  // Single annual figure: $75,000/year or $75K/yr
+  const annualSingle = text.match(/\$\s?([\d,]+\.?\d*)\s*[Kk]?\s*\/?\s*(?:year|yr|annual|annually)/i)
+  if (annualSingle) {
+    let v = parseFloat(annualSingle[1].replace(/,/g, ''))
+    if (/K/i.test(annualSingle[0]) || v < 500) v *= 1000
+    if (v >= 20000) return `$${Math.round(v / 1000)}K+/yr`
+  }
+
+  // Hourly range: $22 - $28/hr
+  const hourlyRange = text.match(/\$\s?([\d.]+)\s*[-–—to]+\s*\$?\s*([\d.]+)\s*\/?\s*(?:hour|hr|h\b)/i)
+  if (hourlyRange) {
+    const lo = parseFloat(hourlyRange[1])
+    const hi = parseFloat(hourlyRange[2])
+    if (lo >= 10) return `$${lo}–$${hi}/hr`
+  }
+
+  // Single hourly: $25/hr
+  const hourlySingle = text.match(/\$\s?([\d.]+)\s*\/?\s*(?:hour|hr|h\b)/i)
+  if (hourlySingle) {
+    const v = parseFloat(hourlySingle[1])
+    if (v >= 10) return `$${v}/hr`
+  }
+
+  return null
+}
 
 function detectJobType(title: string): string | null {
   const t = title.toLowerCase()
@@ -114,7 +158,7 @@ export default function DashboardPage() {
             .single(),
           supabase
             .from('job_matches')
-            .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, salary_min, salary_max, posted_at, synced_at)')
+            .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, salary_min, salary_max, description, posted_at, synced_at)')
             .eq('seeker_id', user.id)
             .gte('match_score', 40)
             .order('match_score', { ascending: false })
@@ -275,11 +319,7 @@ export default function DashboardPage() {
                   {pickedJobs.map((pick) => {
                     const job = pick.external_opportunities
                     if (!job) return null
-                    const salary = job.salary_min && job.salary_max
-                      ? `$${Math.round(job.salary_min / 1000)}K–$${Math.round(job.salary_max / 1000)}K/yr`
-                      : job.salary_min
-                        ? `$${Math.round(job.salary_min / 1000)}K+/yr`
-                        : null
+                    const salary = extractSalary(job.salary_min, job.salary_max, job.description)
                     const jobType = detectJobType(job.title)
                     return (
                       <Link
