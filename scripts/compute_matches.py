@@ -3,15 +3,20 @@
 Nightly match computation: seeker ↔ external-job  (stores ≥40 score)
                            candidate ↔ employer-job (stores ≥50 score)
 
-Scoring pipeline (zero external API cost):
-  1. Synonym normalisation  — "js"→"javascript", "k8s"→"kubernetes" etc.
-  2. Domain phrase extraction — "machine learning", "data science" matched
-     as single units, not split tokens.
-  3. Groq LLM keyword extraction (optional, free tier) — when GROQ_API_KEY
-     is present, richer per-job keyword sets are fetched and cached in
-     external_opportunities.extracted_keywords, replacing full-text
-     tokenisation for far more accurate scoring.
-  4. Set-intersection scoring — capped denominator + industry boost (0-30).
+Scoring pipeline (ATS recruiter model):
+  Stage 1 — Keyword pre-filter (free, instant):
+    • Synonym normalisation  — "js"→"javascript", "k8s"→"kubernetes" etc.
+    • Domain phrase extraction — "machine learning", "data science" matched
+      as single units.
+    • Top-30 most-relevant jobs per seeker are selected for LLM scoring.
+
+  Stage 2 — Groq LLM recruiter scoring (when GROQ_API_KEY is set):
+    • Full resume + full job description sent to llama-3.1-8b-instant.
+    • Model acts as an ATS + senior recruiter, returns JSON:
+        {score, matched, missing, reason}
+    • Score is 0-100, calibrated like a real ATS:
+        ≥70 = Strong Match, 55-69 = Good Match, 40-54 = Possible Match.
+    • Graceful fallback to keyword scoring if Groq key absent / rate limited.
 """
 
 import json
@@ -32,6 +37,42 @@ HEADERS = {
 }
 
 BASE = f"{SUPABASE_URL}/rest/v1"
+
+# ── Groq config ───────────────────────────────────────────────────────────────
+GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_KEY      = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL    = "llama-3.1-8b-instant"   # 20k TPM free tier — highest limits
+GROQ_DELAY    = 3.0                       # seconds between requests → ~20 RPM (safe)
+GROQ_MAX_CALLS_PER_RUN = 300             # cap total LLM calls per nightly run
+                                          # 300 × 3 s ≈ 15 min — fits 20-min window
+
+# Top-N keyword pre-filter per seeker before LLM scoring.
+# Only the most keyword-relevant 30 jobs are sent to the LLM, saving ~98% of API calls.
+LLM_PRE_FILTER_TOP_N = 30
+
+# ── ATS recruiter scoring prompt ──────────────────────────────────────────────
+ATS_PROMPT = """\
+You are an expert ATS (Applicant Tracking System) and senior recruiter. \
+Evaluate how well this candidate's resume matches the job posting.
+
+Scoring guide — be strict, like a real recruiter:
+  85-100 = Excellent match: candidate meets nearly all requirements
+  70-84  = Strong match: candidate meets most key requirements
+  55-69  = Good match: relevant background, some skill gaps
+  40-54  = Possible match: some overlap but noticeable gaps
+   0-39  = Weak match: candidate lacks most requirements
+
+JOB TITLE: {title}
+
+JOB DESCRIPTION:
+{description}
+
+CANDIDATE RESUME:
+{resume}
+
+Return ONLY a valid JSON object (no markdown, no extra text):
+{{"score": <integer 0-100>, "matched": [<up to 8 skills or experiences the candidate HAS that the job needs>], "missing": [<up to 8 key requirements the candidate LACKS>], "reason": "<one concise sentence explaining the score>"}}"""
+
 
 # ── Stop words (mirrors keywordMatcher.ts STOP_WORDS) ────────────────────────
 
@@ -60,25 +101,17 @@ SOFT_SKILLS = frozenset([
 ])
 
 # ── Skill synonym normalisation ───────────────────────────────────────────────
-# Maps common abbreviations / alternate spellings to a canonical form so that
-# "js" in a resume matches "javascript" in a job description and vice-versa.
-
 SKILL_SYNONYMS: dict[str, str] = {
-    # JavaScript / TypeScript
     'js': 'javascript', 'ts': 'typescript',
     'reactjs': 'react', 'react.js': 'react',
     'nodejs': 'node', 'node.js': 'node',
     'vuejs': 'vue', 'vue.js': 'vue',
     'angularjs': 'angular',
     'nextjs': 'next.js',
-    # Python
     'py': 'python',
-    # Cloud
     'gcp': 'google cloud',
     'amazon web services': 'aws',
-    # Containers / orchestration
     'k8s': 'kubernetes', 'kube': 'kubernetes',
-    # ML / AI
     'ml': 'machine learning',
     'dl': 'deep learning',
     'ai': 'artificial intelligence',
@@ -86,32 +119,25 @@ SKILL_SYNONYMS: dict[str, str] = {
     'nlp': 'natural language processing',
     'cv': 'computer vision',
     'llm': 'large language model',
-    # Data
     'bi': 'business intelligence',
     'etl': 'data pipeline',
     'powerbi': 'power bi',
-    # DevOps / CI-CD
     'ci/cd': 'continuous integration',
     'cicd': 'continuous integration',
     'ci': 'continuous integration',
     'cd': 'continuous deployment',
-    # Databases
     'mssql': 'sql server',
     'psql': 'postgresql',
     'pg': 'postgresql',
     'mongo': 'mongodb',
     'es': 'elasticsearch',
     'dynamo': 'dynamodb',
-    # .NET / C#
     'dotnet': '.net',
     'csharp': 'c#',
-    # UX / UI
     'ux': 'user experience',
     'ui': 'user interface',
-    # Version control
     'gh': 'github',
     'gl': 'gitlab',
-    # Microsoft Office
     'ms office': 'microsoft office',
     'msoffice': 'microsoft office',
     'ms excel': 'excel',
@@ -120,12 +146,10 @@ SKILL_SYNONYMS: dict[str, str] = {
 
 
 def normalise(token: str) -> str:
-    """Return the canonical form of a token via SKILL_SYNONYMS."""
     return SKILL_SYNONYMS.get(token, token)
 
 
-# ── Domain signals (mirrors TypeScript DOMAIN_SIGNALS) ────────────────────────
-
+# ── Domain signals ────────────────────────────────────────────────────────────
 DOMAIN_SIGNALS: dict[str, list[str]] = {
     'tech': [
         '.net','c#','java','python','javascript','typescript','react','angular','vue','node.js',
@@ -206,48 +230,26 @@ ADJACENT: dict[str, list[str]] = {
     'engineering': ['tech', 'operations'],
 }
 
-
-# ── Domain phrases (multi-word skills extracted as single match units) ─────────
-# Derived automatically from DOMAIN_SIGNALS so there's one source of truth.
-# These are matched as complete phrases in both resume and job text, preventing
-# "machine" + "learning" being scored as two separate weak signals.
-
 DOMAIN_PHRASES: frozenset = frozenset(
     phrase for phrases in DOMAIN_SIGNALS.values()
     for phrase in phrases if ' ' in phrase
 )
-# e.g. {'machine learning', 'data science', 'software engineer', 'ui design', ...}
 
 
-# ── Core matching utilities ───────────────────────────────────────────────────
+# ── Core keyword utilities (used for Stage 1 pre-filter) ─────────────────────
 
 def tokenize(text: str) -> set:
-    """
-    Extract significant keywords + known domain phrases.
-
-    1. Split on non-alphanumeric separators.
-    2. Normalise each token via SKILL_SYNONYMS.
-    3. Filter stop-words, short tokens, and pure numbers.
-    4. Additionally scan the full text for every DOMAIN_PHRASES entry so that
-       multi-word skills like "machine learning" are treated as single units
-       and match reliably across resume↔job pairs.
-    """
     lower = text.lower()
-
-    # ── Single tokens ──────────────────────────────────────────────────────────
     words = re.split(r'[^a-z0-9#+.\-]+', lower)
     result = set()
     for w in words:
         clean = w.strip('.-')
-        clean = normalise(clean)          # synonym normalisation
+        clean = normalise(clean)
         if len(clean) >= 3 and clean not in STOP_WORDS and not clean.isdigit():
             result.add(clean)
-
-    # ── Multi-word domain phrases ──────────────────────────────────────────────
     for phrase in DOMAIN_PHRASES:
         if phrase in lower:
             result.add(phrase)
-
     return result
 
 
@@ -268,7 +270,6 @@ def detect_domain(text_lower: str) -> str:
 
 
 def industry_score(candidate_text_lower: str, job_category: str) -> int:
-    """0, 12 (adjacent), or 30 (exact). Mirrors computeIndustryScore."""
     job_domain = category_to_domain(job_category)
     candidate_domain = detect_domain(candidate_text_lower)
     if job_domain == 'unknown' or candidate_domain == 'unknown':
@@ -280,87 +281,53 @@ def industry_score(candidate_text_lower: str, job_category: str) -> int:
     return 0
 
 
-def compute_score(
+def keyword_score(
     candidate_tokens: set,
     candidate_text_lower: str,
     job_tokens: set,
     job_category: str,
-    threshold: int = 40,
-) -> dict:
-    """Compute match result with score, matched keywords, and missing keywords.
-
-    Returns a dict:
-        score           int  0-100
-        matched         list[str]  up to 20 tokens in both resume and job
-        missing         list[str]  up to 20 job tokens absent from resume
-
-    Job descriptions often contain 200-500 non-stop-word tokens (boilerplate,
-    prose, legal text).  Dividing by the raw token count makes every score tiny.
-    We cap the effective denominator at 60 so that matching 30 out of the
-    most-relevant tokens in a long description isn't penalised relative to a
-    tightly-written 40-token posting.
-    """
-    empty = {'score': 0, 'matched': [], 'missing': sorted(job_tokens)[:20]}
+) -> int:
+    """Quick keyword intersection score (0-100) used only for Stage 1 pre-filtering."""
     if not job_tokens or not candidate_tokens:
-        return empty
-
-    matched_tokens = job_tokens & candidate_tokens
-    missing_tokens = job_tokens - candidate_tokens
-
-    matched_count = len(matched_tokens)
+        return 0
+    matched_count = len(job_tokens & candidate_tokens)
     effective_denom = max(10, min(len(job_tokens), 60))
     raw_ratio = matched_count / effective_denom
     confidence = min(1.0, len(job_tokens) / 10)
-    kw_score = round(raw_ratio * confidence * 70)
-
-    # Prefer shorter, human-readable tokens for display (skip pure numbers / long hashes)
-    def display_tokens(tset: set, limit: int) -> list:
-        return sorted(t for t in tset if len(t) <= 30)[:limit]
-
-    # Early exit: can't reach threshold even with max industry bonus (30)
-    if kw_score + 30 < threshold:
-        return {
-            'score': kw_score,
-            'matched': display_tokens(matched_tokens, 20),
-            'missing': display_tokens(missing_tokens, 20),
-        }
-
-    ind_score = industry_score(candidate_text_lower, job_category)
-    return {
-        'score': min(100, kw_score + ind_score),
-        'matched': display_tokens(matched_tokens, 20),
-        'missing': display_tokens(missing_tokens, 20),
-    }
+    kw = round(raw_ratio * confidence * 70)
+    ind = industry_score(candidate_text_lower, job_category)
+    return min(100, kw + ind)
 
 
-# ── Groq LLM keyword extraction (free tier, optional) ────────────────────────
-# When GROQ_API_KEY is set, each job gets 10-20 focused skill keywords extracted
-# by llama-3.3-70b instead of using the full-text tokeniser.  These are cached
-# in external_opportunities.extracted_keywords so subsequent runs are instant.
-#
-# Free tier limits: 14 400 req/day, 100 RPM — plenty for a nightly job.
+def get_job_token_set(job: dict) -> set:
+    cached = job.get('extracted_keywords')
+    if cached and isinstance(cached, list) and len(cached) >= 3:
+        result = set()
+        for kw in cached:
+            tok = normalise(kw.lower().strip())
+            if tok:
+                result.add(tok)
+            for phrase in DOMAIN_PHRASES:
+                if phrase in kw.lower():
+                    result.add(phrase)
+        return result - SOFT_SKILLS
+    full = ((job.get('title') or '') + ' ' + (job.get('description') or '')).lower()
+    return tokenize(full) - SOFT_SKILLS
 
-GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_RPM_DELAY = 0.65        # seconds between requests → ≤92 RPM
-GROQ_MAX_PER_RUN = 100       # enrich at most 100 uncached jobs per nightly run
-                              # (~3 min overhead). All 1671 jobs reach full LLM
-                              # coverage after ~17 nights automatically.
 
+# ── Stage 2: Groq ATS recruiter scoring ──────────────────────────────────────
 
-def extract_keywords_groq(job: dict) -> list[str]:
+def score_with_llm(title: str, description: str, resume_text: str) -> dict | None:
     """
-    Call Groq to extract 10-20 specific skill/tool keywords for a job.
-    Returns empty list on any failure so callers can fall back to tokenisation.
+    Score a resume against a job using Groq LLM acting as an ATS recruiter.
+
+    Returns a dict: {score, matched, missing, reason}
+    Returns None on any failure (caller falls back to keyword score).
     """
-    title = (job.get('title') or '')
-    desc  = (job.get('description') or '')[:2000]
-    prompt = (
-        f"Job title: {title}\nJob description:\n{desc}\n\n"
-        "Extract 10-20 specific technical skills, tools, and domain keywords from this job posting. "
-        "Return ONLY a JSON array of strings — no explanation, no markdown. "
-        "Example: [\"Python\", \"SQL\", \"machine learning\", \"AWS\", \"Agile\"]"
+    prompt = ATS_PROMPT.format(
+        title=title or 'Unknown',
+        description=(description or '')[:1500],
+        resume=resume_text[:2000],
     )
     try:
         r = requests.post(
@@ -369,104 +336,37 @@ def extract_keywords_groq(job: dict) -> list[str]:
                 "model": GROQ_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 300,
+                "max_tokens": 400,
             },
             headers={
                 "Authorization": f"Bearer {GROQ_KEY}",
                 "Content-Type": "application/json",
             },
-            timeout=20,
+            timeout=25,
         )
         if r.status_code == 200:
             content = r.json()["choices"][0]["message"]["content"].strip()
-            # Strip markdown code fences if present
+            # Strip markdown fences if the model wraps output anyway
             content = re.sub(r'^```[a-z]*\n?|```$', '', content, flags=re.MULTILINE).strip()
-            kws = json.loads(content)
-            if isinstance(kws, list):
-                return [str(k).strip().lower() for k in kws if k][:20]
+            result = json.loads(content)
+            if isinstance(result, dict) and 'score' in result:
+                return {
+                    'score':   max(0, min(100, int(result.get('score', 0)))),
+                    'matched': [str(k).lower().strip() for k in result.get('matched', [])][:8],
+                    'missing': [str(k).lower().strip() for k in result.get('missing', [])][:8],
+                    'reason':  str(result.get('reason', ''))[:300],
+                }
         elif r.status_code == 429:
-            # Rate limited — back off and skip this job for now
-            time.sleep(5)
+            print("  ⚠ Groq rate limited — sleeping 10 s…")
+            time.sleep(10)
     except Exception as e:
-        pass   # fall back to tokenisation silently
-    return []
-
-
-def cache_job_keywords(job_id: str, keywords: list[str]) -> None:
-    """Persist extracted_keywords back to external_opportunities."""
-    requests.patch(
-        f"{BASE}/external_opportunities?id=eq.{job_id}",
-        json={"extracted_keywords": keywords},
-        headers=HEADERS,
-        timeout=10,
-    )
-
-
-def llm_keywords_to_tokens(kws: list[str]) -> set:
-    """Normalise a list of LLM-returned keyword strings into a scoring token set."""
-    result = set()
-    for kw in kws:
-        tok = normalise(kw.lower().strip())
-        if tok:
-            result.add(tok)
-        for phrase in DOMAIN_PHRASES:
-            if phrase in kw.lower():
-                result.add(phrase)
-    return result - SOFT_SKILLS
-
-
-def enrich_jobs_with_groq(jobs: list[dict]) -> int:
-    """
-    Fetch Groq LLM keywords for up to GROQ_MAX_PER_RUN uncached jobs and
-    persist them.  Returns the number of jobs newly enriched.
-
-    Keeping enrichment in a single pre-pass (not inside the scoring loop)
-    makes the time budget predictable: 100 jobs × ~2 s = ~3 extra minutes,
-    regardless of how many seekers or matches exist.
-    """
-    if not GROQ_KEY:
-        return 0
-
-    uncached = [j for j in jobs if not j.get('extracted_keywords')]
-    to_enrich = uncached[:GROQ_MAX_PER_RUN]
-    if not to_enrich:
-        return 0
-
-    print(f"  Groq enriching {len(to_enrich)} jobs "
-          f"({len(uncached) - len(to_enrich)} remain for future runs)…")
-
-    enriched = 0
-    for job in to_enrich:
-        kws = extract_keywords_groq(job)
-        if kws:
-            cache_job_keywords(job['id'], kws)
-            job['extracted_keywords'] = kws   # update in-memory so scorer uses it now
-            enriched += 1
-        time.sleep(GROQ_RPM_DELAY)
-
-    return enriched
-
-
-def get_job_token_set(job: dict) -> set:
-    """
-    Return the token set to use for scoring.
-
-    Priority:
-      1. Cached LLM keywords (extracted_keywords column) — most accurate.
-      2. Full-text tokenisation fallback (synonyms + domain phrases applied).
-    """
-    cached = job.get('extracted_keywords')
-    if cached and isinstance(cached, list) and len(cached) >= 3:
-        return llm_keywords_to_tokens(cached)
-
-    full = ((job.get('title') or '') + ' ' + (job.get('description') or '')).lower()
-    return tokenize(full) - SOFT_SKILLS
+        pass   # silently fall back to keyword scoring
+    return None
 
 
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
 
 def fetch_all(path: str, params: dict | None = None) -> list:
-    """Fetch all rows with pagination (handles >500 records)."""
     results = []
     limit = 500
     offset = 0
@@ -485,7 +385,6 @@ def fetch_all(path: str, params: dict | None = None) -> list:
 
 
 def upsert_batch(table: str, records: list, on_conflict: str) -> None:
-    """Upsert records in chunks of 200."""
     if not records:
         return
     chunk_size = 200
@@ -507,7 +406,6 @@ def upsert_batch(table: str, records: list, on_conflict: str) -> None:
 
 
 def delete_stale(table: str, cutoff: str) -> None:
-    """Delete rows with computed_at < cutoff."""
     r = requests.delete(
         f"{BASE}/{table}",
         headers=HEADERS,
@@ -527,6 +425,7 @@ def main() -> None:
     print(f"\n{'='*60}")
     print(f"MATCH COMPUTE — {now.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"Supabase: {SUPABASE_URL}")
+    print(f"Scoring mode: {'🤖 LLM (ATS recruiter)' if GROQ_KEY else '🔑 Keyword fallback (set GROQ_API_KEY to enable LLM)'}")
     print(f"{'='*60}")
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
@@ -539,7 +438,6 @@ def main() -> None:
     sp_map = {sp['user_id']: sp for sp in all_sp}
     print(f"  Seeker profiles loaded: {len(sp_map)}")
 
-    # Pre-tokenize candidate texts
     skipped = 0
     for uid, sp in sp_map.items():
         raw = sp.get('resume_text') or ''
@@ -548,6 +446,7 @@ def main() -> None:
             raw = ' '.join(skills)
         sp['_text_lower'] = raw.lower()
         sp['_tokens'] = tokenize(sp['_text_lower']) if len(raw) >= 30 else set()
+        sp['_resume_text'] = raw   # keep original for LLM
         if not sp['_tokens']:
             skipped += 1
     if skipped:
@@ -558,11 +457,6 @@ def main() -> None:
         {'select': 'id,title,description,category,work_mode,city,extracted_keywords'},
     )
     print(f"  External jobs: {len(ext_jobs)}")
-    cached_count = sum(1 for j in ext_jobs if j.get('extracted_keywords'))
-    if GROQ_KEY:
-        print(f"  LLM keywords cached: {cached_count}/{len(ext_jobs)} jobs (remaining will be fetched via Groq)")
-    else:
-        print(f"  LLM keywords cached: {cached_count}/{len(ext_jobs)} jobs (set GROQ_API_KEY to enable Groq enrichment)")
 
     open_opps = fetch_all(
         'opportunities',
@@ -570,12 +464,7 @@ def main() -> None:
     )
     print(f"  Open CanStart opportunities: {len(open_opps)}")
 
-    # Optional Groq pre-pass — enriches up to 100 uncached jobs before scoring
-    newly_enriched = enrich_jobs_with_groq(ext_jobs)
-    if newly_enriched:
-        print(f"  ✓ Groq enriched {newly_enriched} jobs this run")
-
-    # Pre-tokenize job texts (uses LLM keywords when cached, else full-text tokeniser)
+    # Pre-tokenize job texts (used for Stage 1 keyword pre-filter)
     for job in ext_jobs:
         job['_tokens'] = get_job_token_set(job)
 
@@ -587,39 +476,90 @@ def main() -> None:
         ).lower()
         opp['_tokens'] = tokenize(full) - SOFT_SKILLS
 
-    # ── 2. Seeker ↔ External Job matching (threshold ≥40%) ───────────────────
+    # ── 2. Seeker ↔ External Job matching ────────────────────────────────────
     SEEKER_JOB_THRESHOLD = 40
     print(f"\n[1/2] Seeker–Job matching (threshold ≥{SEEKER_JOB_THRESHOLD}%)")
+
     job_match_records: list[dict] = []
     computed_ts = now.isoformat()
+    total_llm_calls = 0
 
     for seeker in seekers:
         uid = seeker['user_id']
         sp = sp_map.get(uid)
         if not sp or not sp['_tokens']:
             continue
-        c_tokens = sp['_tokens']
-        c_text = sp['_text_lower']
 
-        for job in ext_jobs:
-            j_tokens = job['_tokens']
-            if not j_tokens:
-                continue
-            result = compute_score(c_tokens, c_text, j_tokens, job.get('category', ''), SEEKER_JOB_THRESHOLD)
-            if result['score'] >= SEEKER_JOB_THRESHOLD:
-                job_match_records.append({
-                    'seeker_id': uid,
-                    'job_id': job['id'],
-                    'match_score': result['score'],
-                    'matched_keywords': result['matched'],
-                    'missing_keywords': result['missing'],
-                    'computed_at': computed_ts,
-                })
+        c_tokens     = sp['_tokens']
+        c_text       = sp['_text_lower']
+        resume_text  = sp['_resume_text']
+        use_llm      = (GROQ_KEY and len(resume_text) >= 50
+                        and total_llm_calls < GROQ_MAX_CALLS_PER_RUN)
 
+        if use_llm:
+            # ── Stage 1: keyword pre-filter → top N jobs ──────────────────
+            scored_jobs: list[tuple[int, dict]] = []
+            for job in ext_jobs:
+                if not job['_tokens']:
+                    continue
+                ks = keyword_score(c_tokens, c_text, job['_tokens'], job.get('category', ''))
+                if ks > 0:
+                    scored_jobs.append((ks, job))
+
+            scored_jobs.sort(key=lambda x: x[0], reverse=True)
+            top_jobs = [job for _, job in scored_jobs[:LLM_PRE_FILTER_TOP_N]]
+
+            print(f"  Seeker {uid[:8]}: {len(top_jobs)} candidates → LLM scoring…")
+
+            # ── Stage 2: LLM recruiter scoring ────────────────────────────
+            for job in top_jobs:
+                if total_llm_calls >= GROQ_MAX_CALLS_PER_RUN:
+                    print(f"  ⚠ LLM call cap ({GROQ_MAX_CALLS_PER_RUN}) reached — remaining seekers use keyword fallback")
+                    break
+
+                llm = score_with_llm(
+                    job.get('title', ''),
+                    job.get('description', ''),
+                    resume_text,
+                )
+                total_llm_calls += 1
+                time.sleep(GROQ_DELAY)
+
+                if llm and llm['score'] >= SEEKER_JOB_THRESHOLD:
+                    job_match_records.append({
+                        'seeker_id':        uid,
+                        'job_id':           job['id'],
+                        'match_score':      llm['score'],
+                        'matched_keywords': llm['matched'],
+                        'missing_keywords': llm['missing'],
+                        'match_reason':     llm['reason'],
+                        'computed_at':      computed_ts,
+                    })
+        else:
+            # ── Keyword-only fallback ──────────────────────────────────────
+            for job in ext_jobs:
+                if not job['_tokens']:
+                    continue
+                ks = keyword_score(c_tokens, c_text, job['_tokens'], job.get('category', ''))
+                if ks >= SEEKER_JOB_THRESHOLD:
+                    matched_t = sorted(t for t in (job['_tokens'] & c_tokens) if len(t) <= 30)[:20]
+                    missing_t = sorted(t for t in (job['_tokens'] - c_tokens) if len(t) <= 30)[:20]
+                    job_match_records.append({
+                        'seeker_id':        uid,
+                        'job_id':           job['id'],
+                        'match_score':      ks,
+                        'matched_keywords': matched_t,
+                        'missing_keywords': missing_t,
+                        'match_reason':     None,
+                        'computed_at':      computed_ts,
+                    })
+
+    if GROQ_KEY:
+        print(f"  LLM calls used: {total_llm_calls} / {GROQ_MAX_CALLS_PER_RUN}")
     print(f"  Matches found: {len(job_match_records)}")
     upsert_batch('job_matches', job_match_records, 'seeker_id,job_id')
 
-    # ── 3. Employer ↔ Candidate matching (threshold ≥50%) ────────────────────
+    # ── 3. Employer ↔ Candidate matching (keyword scoring, threshold ≥50%) ──
     CANDIDATE_THRESHOLD = 50
     print(f"\n[2/2] Employer–Candidate matching (threshold ≥{CANDIDATE_THRESHOLD}%)")
     candidate_match_records: list[dict] = []
@@ -638,16 +578,18 @@ def main() -> None:
             sp = sp_map.get(uid)
             if not sp or not sp['_tokens']:
                 continue
-            result = compute_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat, CANDIDATE_THRESHOLD)
-            if result['score'] >= CANDIDATE_THRESHOLD:
+            ks = keyword_score(sp['_tokens'], sp['_text_lower'], j_tokens, job_cat)
+            if ks >= CANDIDATE_THRESHOLD:
+                matched_t = sorted(t for t in (j_tokens & sp['_tokens']) if len(t) <= 30)[:20]
+                missing_t = sorted(t for t in (j_tokens - sp['_tokens']) if len(t) <= 30)[:20]
                 candidate_match_records.append({
-                    'employer_id': employer_id,
-                    'opportunity_id': opp['id'],
-                    'seeker_id': uid,
-                    'match_score': result['score'],
-                    'matched_keywords': result['matched'],
-                    'missing_keywords': result['missing'],
-                    'computed_at': computed_ts,
+                    'employer_id':      employer_id,
+                    'opportunity_id':   opp['id'],
+                    'seeker_id':        uid,
+                    'match_score':      ks,
+                    'matched_keywords': matched_t,
+                    'missing_keywords': missing_t,
+                    'computed_at':      computed_ts,
                 })
 
     print(f"  Matches found: {len(candidate_match_records)}")

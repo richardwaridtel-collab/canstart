@@ -15,6 +15,7 @@ type PickedJob = {
   job_id: string
   matched_keywords: string[]
   missing_keywords: string[]
+  match_reason?: string | null
   external_opportunities: {
     id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string
   } | null
@@ -101,7 +102,7 @@ export default function DashboardPage() {
       try {
         const { data: picks } = await supabase
           .from('job_matches')
-          .select('match_score, job_id, matched_keywords, missing_keywords, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
+          .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
           .eq('seeker_id', user.id)
           .gte('match_score', 40)
           .order('match_score', { ascending: false })
@@ -274,8 +275,12 @@ export default function DashboardPage() {
                             <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
                           </div>
                         </div>
+                        {/* Recruiter reason (LLM) */}
+                        {pick.match_reason && (
+                          <p className="mt-2 text-xs text-gray-500 italic">{pick.match_reason}</p>
+                        )}
                         {/* Keyword breakdown */}
-                        <div className="mt-2 flex flex-wrap gap-1">
+                        <div className="mt-1.5 flex flex-wrap gap-1">
                           {matched.slice(0, 5).map(kw => (
                             <span key={kw} className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium">✓ {kw}</span>
                           ))}

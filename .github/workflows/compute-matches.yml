@@ -9,7 +9,7 @@ jobs:
   compute:
     name: Compute seeker & employer match scores
     runs-on: ubuntu-latest
-    timeout-minutes: 20   # Groq enrichment capped at 100 jobs/run (~3 min); scoring ~30 s
+    timeout-minutes: 30   # LLM ATS scoring: up to 300 calls × 3 s ≈ 15 min; with overhead ~25 min
 
     steps:
       - name: Checkout repository
