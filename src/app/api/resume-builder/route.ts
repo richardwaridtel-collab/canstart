@@ -157,14 +157,15 @@ async function callWithFallback(messages: object[], maxTokens: number): Promise<
   // Shuffle providers so load is distributed randomly across requests
   const shuffled = available.sort(() => Math.random() - 0.5)
 
-  let lastError = ''
+  const errors: string[] = []
   for (const provider of shuffled) {
     let res: Response
     try {
       res = await callLLM(messages, maxTokens, provider)
     } catch (e) {
-      console.warn(`${provider.name} network error — trying next:`, e)
-      lastError = `${provider.name} network error`
+      const msg = `${provider.name}:network_error`
+      console.warn(`${msg}`, e)
+      errors.push(msg)
       continue
     }
 
@@ -174,13 +175,17 @@ async function callWithFallback(messages: object[], maxTokens: number): Promise<
     }
 
     const errText = await res.text()
-    lastError = `${provider.name} ${res.status}`
-    console.warn(`${provider.name} returned ${res.status} — trying next provider. Body: ${errText.slice(0, 200)}`)
+    const errSummary = `${provider.name}:${res.status}`
+    errors.push(errSummary)
+    console.warn(`${errSummary} — Body: ${errText.slice(0, 300)}`)
   }
 
-  // All providers failed
-  if (lastError.includes('429')) throw new Error('ALL_RATE_LIMITED')
-  throw new Error(`ALL_FAILED: ${lastError}`)
+  // All providers failed — log full picture
+  console.error('All providers failed:', errors.join(', '))
+  const all429 = errors.every(e => e.includes(':429'))
+  const any429 = errors.some(e => e.includes(':429'))
+  if (all429 || any429) throw new Error(`ALL_RATE_LIMITED: ${errors.join(', ')}`)
+  throw new Error(`ALL_FAILED: ${errors.join(', ')}`)
 }
 
 export async function POST(request: Request) {
@@ -247,12 +252,13 @@ export async function POST(request: Request) {
       ;({ res: aiRes, provider: providerName } = await callWithFallback(messages, 6000))
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
-      if (msg === 'ALL_RATE_LIMITED') {
-        return NextResponse.json({ error: 'AI services are under heavy load. Please wait a minute and try again.' }, { status: 429 })
+      if (msg.startsWith('ALL_RATE_LIMITED')) {
+        const detail = msg.replace('ALL_RATE_LIMITED: ', '')
+        return NextResponse.json({ error: `AI services busy — ${detail}. Please wait a minute and try again.` }, { status: 429 })
       }
       if (msg.startsWith('ALL_FAILED')) {
-        console.error('All providers failed:', msg)
-        return NextResponse.json({ error: 'AI service is temporarily unavailable. Please try again in a few seconds.' }, { status: 500 })
+        const detail = msg.replace('ALL_FAILED: ', '')
+        return NextResponse.json({ error: `All AI providers failed — ${detail}` }, { status: 500 })
       }
       console.error('No AI providers configured:', e)
       return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
