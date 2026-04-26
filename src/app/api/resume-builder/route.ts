@@ -114,7 +114,7 @@ function getAvailableProviders(): ProviderConfig[] {
     providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
   if (process.env.CEREBRAS_API_KEY) {
-    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.3-70b', key: process.env.CEREBRAS_API_KEY })
+    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.1-70b', key: process.env.CEREBRAS_API_KEY })
   }
   if (process.env.OPENROUTER_API_KEY) {
     // OpenRouter free tier: routes to free models across multiple providers
@@ -158,33 +158,45 @@ async function callWithFallback(messages: object[], maxTokens: number): Promise<
   const shuffled = available.sort(() => Math.random() - 0.5)
 
   const errors: string[] = []
-  for (const provider of shuffled) {
-    let res: Response
-    try {
-      res = await callLLM(messages, maxTokens, provider)
-    } catch (e) {
-      const msg = `${provider.name}:network_error`
-      console.warn(`${msg}`, e)
-      errors.push(msg)
-      continue
+
+  // Two passes: first try all providers, then retry 429s after a short wait
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass === 1) {
+      // Second pass: only retry providers that returned 429
+      const had429 = errors.some(e => e.includes(':429'))
+      if (!had429) break
+      await new Promise(r => setTimeout(r, 4000))
     }
 
-    if (res.ok) {
-      console.log(`Resume built via ${provider.name}`)
-      return { res, provider: provider.name }
-    }
+    for (const provider of shuffled) {
+      // On second pass, skip providers that didn't return 429
+      if (pass === 1 && !errors.find(e => e.startsWith(`${provider.name}:429`))) continue
 
-    const errText = await res.text()
-    const errSummary = `${provider.name}:${res.status}`
-    errors.push(errSummary)
-    console.warn(`${errSummary} — Body: ${errText.slice(0, 300)}`)
+      let res: Response
+      try {
+        res = await callLLM(messages, maxTokens, provider)
+      } catch (e) {
+        const msg = `${provider.name}:network_error`
+        console.warn(msg, e)
+        if (pass === 0) errors.push(msg)
+        continue
+      }
+
+      if (res.ok) {
+        console.log(`Resume built via ${provider.name} (pass ${pass + 1})`)
+        return { res, provider: provider.name }
+      }
+
+      const errText = await res.text()
+      const errSummary = `${provider.name}:${res.status}`
+      if (pass === 0) errors.push(errSummary)
+      console.warn(`${errSummary} pass${pass + 1} — ${errText.slice(0, 200)}`)
+    }
   }
 
-  // All providers failed — log full picture
   console.error('All providers failed:', errors.join(', '))
-  const all429 = errors.every(e => e.includes(':429'))
   const any429 = errors.some(e => e.includes(':429'))
-  if (all429 || any429) throw new Error(`ALL_RATE_LIMITED: ${errors.join(', ')}`)
+  if (any429) throw new Error(`ALL_RATE_LIMITED: ${errors.join(', ')}`)
   throw new Error(`ALL_FAILED: ${errors.join(', ')}`)
 }
 
