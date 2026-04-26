@@ -9,7 +9,7 @@ jobs:
   compute:
     name: Compute seeker & employer match scores
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45   # first run fetches Groq keywords for all jobs (~18 min); subsequent runs ~30 s
 
     steps:
       - name: Checkout repository
@@ -29,4 +29,5 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}   # optional — enables LLM keyword extraction
         run: python scripts/compute_matches.py
