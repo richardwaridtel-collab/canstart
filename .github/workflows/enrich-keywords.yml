@@ -1,0 +1,31 @@
+name: Enrich Job Keywords (One-Time)
+
+on:
+  workflow_dispatch:   # Manual trigger only — run once to populate all jobs
+
+jobs:
+  enrich:
+    name: Batch-enrich external_opportunities with LLM keywords
+    runs-on: ubuntu-latest
+    timeout-minutes: 30   # ~334 Groq calls × 2.2 s delay ≈ 12 min; 30 min gives headroom
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run keyword enrichment
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python scripts/enrich_keywords.py
