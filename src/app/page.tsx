@@ -83,14 +83,14 @@ export default function LandingPage() {
                 href="/auth/signup?role=seeker"
                 className="inline-flex items-center justify-center gap-2 bg-white text-red-600 hover:bg-yellow-300 hover:text-red-700 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-lg"
               >
-                I&apos;m a Newcomer
+                Job Seeker
                 <ArrowRight size={20} />
               </Link>
               <Link
                 href="/auth/signup?role=employer"
                 className="inline-flex items-center justify-center gap-2 bg-transparent border-2 border-white/50 hover:border-white hover:bg-white/10 text-white px-8 py-4 rounded-xl font-bold text-lg transition-all"
               >
-                I&apos;m an Employer
+                Employer
               </Link>
             </div>
           </div>

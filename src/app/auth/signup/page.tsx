@@ -134,7 +134,7 @@ function SignUpForm() {
           >
             <Users size={28} />
             <div>
-              <div className="font-semibold text-sm">I&apos;m a Newcomer</div>
+              <div className="font-semibold text-sm">Job Seeker</div>
               <div className="text-xs text-gray-500 mt-0.5">Looking for opportunities</div>
             </div>
             {role === 'seeker' && <CheckCircle size={16} className="text-red-600" />}
@@ -150,7 +150,7 @@ function SignUpForm() {
           >
             <Building2 size={28} />
             <div>
-              <div className="font-semibold text-sm">I&apos;m an Employer</div>
+              <div className="font-semibold text-sm">Employer</div>
               <div className="text-xs text-gray-500 mt-0.5">Posting opportunities</div>
             </div>
             {role === 'employer' && <CheckCircle size={16} className="text-red-600" />}
