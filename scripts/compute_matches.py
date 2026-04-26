@@ -8,9 +8,15 @@ Scoring pipeline (ATS recruiter model):
     • Synonym normalisation  — "js"→"javascript", "k8s"→"kubernetes" etc.
     • Domain phrase extraction — "machine learning", "data science" matched
       as single units.
-    • Top-30 most-relevant jobs per seeker are selected for LLM scoring.
+    • Top-15 most-relevant jobs per seeker selected for LLM scoring.
 
-  Stage 2 — Groq LLM recruiter scoring (when GROQ_API_KEY is set):
+  Stage 2 — Resume-hash caching (makes nightly runs nearly instant):
+    • MD5 hash of each seeker's resume is stored in seeker_profiles.resume_hash.
+    • If the hash matches what was stored last run → skip LLM scoring entirely
+      (existing job_matches are still accurate).
+    • Only re-score when the seeker actually updates their resume.
+
+  Stage 3 — Groq LLM recruiter scoring (when GROQ_API_KEY is set):
     • Full resume + full job description sent to llama-3.1-8b-instant.
     • Model acts as an ATS + senior recruiter, returns JSON:
         {score, matched, missing, reason}
@@ -19,6 +25,7 @@ Scoring pipeline (ATS recruiter model):
     • Graceful fallback to keyword scoring if Groq key absent / rate limited.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -42,13 +49,14 @@ BASE = f"{SUPABASE_URL}/rest/v1"
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_KEY      = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL    = "llama-3.1-8b-instant"   # 20k TPM free tier — highest limits
-GROQ_DELAY    = 3.0                       # seconds between requests → ~20 RPM (safe)
+GROQ_DELAY    = 2.0                       # seconds between requests → ~30 RPM (safe)
 GROQ_MAX_CALLS_PER_RUN = 300             # cap total LLM calls per nightly run
-                                          # 300 × 3 s ≈ 15 min — fits 20-min window
+                                          # 300 × 2 s ≈ 10 min — fits 20-min window
 
 # Top-N keyword pre-filter per seeker before LLM scoring.
-# Only the most keyword-relevant 30 jobs are sent to the LLM, saving ~98% of API calls.
-LLM_PRE_FILTER_TOP_N = 30
+# Only the most keyword-relevant 15 jobs are sent to the LLM, saving ~99% of API calls.
+# Resume-hash caching means this only runs when the seeker updates their resume.
+LLM_PRE_FILTER_TOP_N = 15
 
 # ── ATS recruiter scoring prompt ──────────────────────────────────────────────
 ATS_PROMPT = """\
@@ -364,6 +372,26 @@ def score_with_llm(title: str, description: str, resume_text: str) -> dict | Non
     return None
 
 
+# ── Resume-hash caching ───────────────────────────────────────────────────────
+# Stores an MD5 hash of each seeker's resume in seeker_profiles.resume_hash.
+# If the hash hasn't changed since last run the seeker's existing job_matches
+# are still accurate — we skip LLM scoring entirely, making nightly runs instant.
+# Only seekers who actually updated their resume get re-scored.
+
+def resume_hash(text: str) -> str:
+    return hashlib.md5(text.encode('utf-8', errors='ignore')).hexdigest()
+
+
+def store_resume_hash(user_id: str, h: str) -> None:
+    """Persist the resume hash back to seeker_profiles after scoring."""
+    requests.patch(
+        f"{BASE}/seeker_profiles?user_id=eq.{user_id}",
+        json={"resume_hash": h},
+        headers=HEADERS,
+        timeout=10,
+    )
+
+
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
 
 def fetch_all(path: str, params: dict | None = None) -> list:
@@ -434,7 +462,7 @@ def main() -> None:
     seekers = fetch_all('profiles', {'role': 'eq.seeker', 'select': 'user_id'})
     print(f"  Seekers: {len(seekers)}")
 
-    all_sp = fetch_all('seeker_profiles', {'select': 'user_id,skills,resume_text'})
+    all_sp = fetch_all('seeker_profiles', {'select': 'user_id,skills,resume_text,resume_hash'})
     sp_map = {sp['user_id']: sp for sp in all_sp}
     print(f"  Seeker profiles loaded: {len(sp_map)}")
 
@@ -447,6 +475,8 @@ def main() -> None:
         sp['_text_lower'] = raw.lower()
         sp['_tokens'] = tokenize(sp['_text_lower']) if len(raw) >= 30 else set()
         sp['_resume_text'] = raw   # keep original for LLM
+        sp['_resume_hash'] = resume_hash(raw) if raw else ''
+        sp['_hash_changed'] = (sp['_resume_hash'] != (sp.get('resume_hash') or ''))
         if not sp['_tokens']:
             skipped += 1
     if skipped:
@@ -483,6 +513,8 @@ def main() -> None:
     job_match_records: list[dict] = []
     computed_ts = now.isoformat()
     total_llm_calls = 0
+    skipped_cached = 0
+    rescored = 0
 
     for seeker in seekers:
         uid = seeker['user_id']
@@ -493,8 +525,18 @@ def main() -> None:
         c_tokens     = sp['_tokens']
         c_text       = sp['_text_lower']
         resume_text  = sp['_resume_text']
-        use_llm      = (GROQ_KEY and len(resume_text) >= 50
-                        and total_llm_calls < GROQ_MAX_CALLS_PER_RUN)
+        hash_changed = sp['_hash_changed']
+
+        # ── Resume-hash cache check ────────────────────────────────────────
+        # If the seeker's resume hasn't changed since last run, their existing
+        # job_matches are still accurate — skip all LLM calls for this seeker.
+        if GROQ_KEY and not hash_changed:
+            skipped_cached += 1
+            print(f"  Seeker {uid[:8]}: resume unchanged → skipping (using cached matches)")
+            continue
+
+        use_llm = (GROQ_KEY and len(resume_text) >= 50
+                   and total_llm_calls < GROQ_MAX_CALLS_PER_RUN)
 
         if use_llm:
             # ── Stage 1: keyword pre-filter → top N jobs ──────────────────
@@ -509,9 +551,10 @@ def main() -> None:
             scored_jobs.sort(key=lambda x: x[0], reverse=True)
             top_jobs = [job for _, job in scored_jobs[:LLM_PRE_FILTER_TOP_N]]
 
-            print(f"  Seeker {uid[:8]}: {len(top_jobs)} candidates → LLM scoring…")
+            print(f"  Seeker {uid[:8]}: resume changed → LLM scoring top {len(top_jobs)} jobs…")
 
             # ── Stage 2: LLM recruiter scoring ────────────────────────────
+            seeker_matches: list[dict] = []
             for job in top_jobs:
                 if total_llm_calls >= GROQ_MAX_CALLS_PER_RUN:
                     print(f"  ⚠ LLM call cap ({GROQ_MAX_CALLS_PER_RUN}) reached — remaining seekers use keyword fallback")
@@ -526,7 +569,7 @@ def main() -> None:
                 time.sleep(GROQ_DELAY)
 
                 if llm and llm['score'] >= SEEKER_JOB_THRESHOLD:
-                    job_match_records.append({
+                    seeker_matches.append({
                         'seeker_id':        uid,
                         'job_id':           job['id'],
                         'match_score':      llm['score'],
@@ -535,6 +578,13 @@ def main() -> None:
                         'match_reason':     llm['reason'],
                         'computed_at':      computed_ts,
                     })
+
+            job_match_records.extend(seeker_matches)
+            rescored += 1
+
+            # Store the new resume hash so next run skips this seeker
+            store_resume_hash(uid, sp['_resume_hash'])
+
         else:
             # ── Keyword-only fallback ──────────────────────────────────────
             for job in ext_jobs:
@@ -553,11 +603,14 @@ def main() -> None:
                         'match_reason':     None,
                         'computed_at':      computed_ts,
                     })
+            store_resume_hash(uid, sp['_resume_hash'])
 
+    print(f"  Seekers re-scored: {rescored} | Skipped (resume unchanged): {skipped_cached}")
     if GROQ_KEY:
         print(f"  LLM calls used: {total_llm_calls} / {GROQ_MAX_CALLS_PER_RUN}")
-    print(f"  Matches found: {len(job_match_records)}")
-    upsert_batch('job_matches', job_match_records, 'seeker_id,job_id')
+    print(f"  New match records: {len(job_match_records)}")
+    if job_match_records:
+        upsert_batch('job_matches', job_match_records, 'seeker_id,job_id')
 
     # ── 3. Employer ↔ Candidate matching (keyword scoring, threshold ≥50%) ──
     CANDIDATE_THRESHOLD = 50
