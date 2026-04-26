@@ -25,44 +25,61 @@ type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: 
 
 
 function extractSalary(salaryMin?: number, salaryMax?: number, description?: string): string | null {
-  // 1. Use structured DB fields if present
+  // 1. Structured DB fields first
   if (salaryMin && salaryMax) return `$${Math.round(salaryMin / 1000)}K–$${Math.round(salaryMax / 1000)}K/yr`
   if (salaryMin) return `$${Math.round(salaryMin / 1000)}K+/yr`
 
-  // 2. Fallback: parse salary from description text
   if (!description) return null
-  const text = description.slice(0, 1500)
 
-  // Annual range: $60,000 - $80,000 or $60K - $80K
-  const annualRange = text.match(/\$\s?([\d,]+\.?\d*)\s*[Kk]?\s*[-–—to]+\s*\$?\s*([\d,]+\.?\d*)\s*[Kk]?\s*(?:\/?\s*(?:year|yr|annual|annually))?/i)
-  if (annualRange) {
-    let lo = parseFloat(annualRange[1].replace(/,/g, ''))
-    let hi = parseFloat(annualRange[2].replace(/,/g, ''))
-    if (/K/i.test(annualRange[0]) || (lo < 500 && hi < 500)) { lo *= 1000; hi *= 1000 }
-    if (lo >= 20000) return `$${Math.round(lo / 1000)}K–$${Math.round(hi / 1000)}K/yr`
+  // Normalise: strip markdown escapes, bold markers, extra whitespace
+  const text = description.slice(0, 3000)
+    .replace(/\\-/g, '-')
+    .replace(/\\\./g, '.')
+    .replace(/\*\*/g, '')
+    .replace(/\s+/g, ' ')
+
+  const parseNum = (digits: string, kFlag: boolean): number => {
+    const n = parseFloat(digits.replace(/,/g, ''))
+    return kFlag ? n * 1000 : n
   }
 
-  // Single annual figure: $75,000/year or $75K/yr
-  const annualSingle = text.match(/\$\s?([\d,]+\.?\d*)\s*[Kk]?\s*\/?\s*(?:year|yr|annual|annually)/i)
-  if (annualSingle) {
-    let v = parseFloat(annualSingle[1].replace(/,/g, ''))
-    if (/K/i.test(annualSingle[0]) || v < 500) v *= 1000
+  // ── Annual range ── $70,000 - $80,000 / $70K–$80K / 70,000 to 80,000 /yr
+  const rangeRe = /\$\s*([\d,]+)\s*(k)?\s*[-–—\\]+\s*\$?\s*([\d,]+)\s*(k)?(?:\s*(?:\/\s*)?(?:year|yr|annually|per\s+year|per\s+annum))?/gi
+  let m: RegExpExecArray | null
+  while ((m = rangeRe.exec(text)) !== null) {
+    const lo = parseNum(m[1], !!m[2])
+    const hi = parseNum(m[3], !!m[4])
+    if (lo >= 20000 && hi >= lo) return `$${Math.round(lo / 1000)}K–$${Math.round(hi / 1000)}K/yr`
+  }
+
+  // ── Salary context range (no $ on second number) ── Salary: 70,000 - 80,000
+  const ctxRe = /(?:salary|compensation|pay|wage)[^\d$]{0,15}\$?\s*([\d,]+)\s*(k)?\s*[-–—to]+\s*\$?\s*([\d,]+)\s*(k)?/gi
+  while ((m = ctxRe.exec(text)) !== null) {
+    const lo = parseNum(m[1], !!m[2])
+    const hi = parseNum(m[3], !!m[4])
+    if (lo >= 20000 && hi >= lo) return `$${Math.round(lo / 1000)}K–$${Math.round(hi / 1000)}K/yr`
+    if (lo >= 10 && hi >= lo && hi < 500) return `$${lo}–$${hi}/hr`
+  }
+
+  // ── Single annual ── $75,000/year / $75K annually
+  const annRe = /\$\s*([\d,]+)\s*(k)?\s*(?:\/\s*)?(?:year|yr|annually|per\s+year|per\s+annum)/gi
+  while ((m = annRe.exec(text)) !== null) {
+    const v = parseNum(m[1], !!m[2])
     if (v >= 20000) return `$${Math.round(v / 1000)}K+/yr`
   }
 
-  // Hourly range: $22 - $28/hr
-  const hourlyRange = text.match(/\$\s?([\d.]+)\s*[-–—to]+\s*\$?\s*([\d.]+)\s*\/?\s*(?:hour|hr|h\b)/i)
-  if (hourlyRange) {
-    const lo = parseFloat(hourlyRange[1])
-    const hi = parseFloat(hourlyRange[2])
-    if (lo >= 10) return `$${lo}–$${hi}/hr`
+  // ── Hourly range ── $22 - $28/hr / $22-28 per hour
+  const hrRangeRe = /\$\s*([\d.]+)\s*[-–—]+\s*\$?\s*([\d.]+)\s*(?:\/\s*)?(?:hour|hr\b|per\s+hour)/gi
+  while ((m = hrRangeRe.exec(text)) !== null) {
+    const lo = parseFloat(m[1]), hi = parseFloat(m[2])
+    if (lo >= 10 && hi >= lo && hi < 500) return `$${lo}–$${hi}/hr`
   }
 
-  // Single hourly: $25/hr
-  const hourlySingle = text.match(/\$\s?([\d.]+)\s*\/?\s*(?:hour|hr|h\b)/i)
-  if (hourlySingle) {
-    const v = parseFloat(hourlySingle[1])
-    if (v >= 10) return `$${v}/hr`
+  // ── Single hourly ── $25/hr / $25 per hour
+  const hrSingleRe = /\$\s*([\d.]+)\s*(?:\/\s*)?(?:hour|hr\b|per\s+hour)/gi
+  while ((m = hrSingleRe.exec(text)) !== null) {
+    const v = parseFloat(m[1])
+    if (v >= 10 && v < 500) return `$${v}/hr`
   }
 
   return null
