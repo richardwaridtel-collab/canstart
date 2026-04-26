@@ -152,13 +152,14 @@ def fetch_uncached_jobs() -> list[dict]:
 
 
 def save_batch(updates: list[dict]) -> None:
-    """Bulk-save up to 500 rows via Supabase upsert."""
-    requests.post(
-        f"{BASE}/external_opportunities",
-        json=updates,
-        headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
-        timeout=30,
-    )
+    """Save keywords for a batch of jobs via individual PATCH requests."""
+    for item in updates:
+        requests.patch(
+            f"{BASE}/external_opportunities?id=eq.{item['id']}",
+            json={"extracted_keywords": item["extracted_keywords"]},
+            headers=HEADERS,
+            timeout=10,
+        )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
