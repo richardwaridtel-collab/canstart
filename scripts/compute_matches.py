@@ -150,6 +150,32 @@ SKILL_SYNONYMS: dict[str, str] = {
     'msoffice': 'microsoft office',
     'ms excel': 'excel',
     'ms word': 'word',
+    # Role/word-form lemmatization — resume says "management", job says "manager"
+    'management': 'manager',
+    'managing': 'manager',
+    'analysis': 'analyst',
+    'analyzing': 'analyst',
+    'analysing': 'analyst',
+    'engineering': 'engineer',
+    'designing': 'designer',
+    'developing': 'developer',
+    'development': 'developer',
+    'recruiting': 'recruiter',
+    'recruitment': 'recruiter',
+    'accounting': 'accountant',
+    'programming': 'programmer',
+    'coordinating': 'coordinator',
+    'coordination': 'coordinator',
+    'consulting': 'consultant',
+    'planning': 'planner',
+    'researching': 'researcher',
+    'research': 'researcher',
+    'writing': 'writer',
+    'marketing': 'marketer',
+    'training': 'trainer',
+    'testing': 'tester',
+    'designing': 'designer',
+    'architecture': 'architect',
 }
 
 
@@ -305,6 +331,14 @@ def keyword_score(
     kw = round(raw_ratio * confidence * 70)
     ind = industry_score(candidate_text_lower, job_category)
     return min(100, kw + ind)
+
+
+def title_matches_preferred_role(job_title: str, preferred_role_tokens: list[str]) -> bool:
+    """Return True if the job title contains any of the candidate's preferred role names."""
+    if not preferred_role_tokens or not job_title:
+        return False
+    title_lower = job_title.lower()
+    return any(role in title_lower for role in preferred_role_tokens)
 
 
 def get_job_token_set(job: dict) -> set:
@@ -472,7 +506,7 @@ def main() -> None:
     seekers = fetch_all('profiles', {'role': 'eq.seeker', 'select': 'user_id'})
     print(f"  Seekers: {len(seekers)}")
 
-    all_sp = fetch_all('seeker_profiles', {'select': 'user_id,skills,resume_text,resume_hash'})
+    all_sp = fetch_all('seeker_profiles', {'select': 'user_id,skills,resume_text,resume_hash,preferred_roles'})
     sp_map = {sp['user_id']: sp for sp in all_sp}
     print(f"  Seeker profiles loaded: {len(sp_map)}")
 
@@ -487,6 +521,10 @@ def main() -> None:
         sp['_resume_text'] = raw   # keep original for LLM
         sp['_resume_hash'] = resume_hash(raw) if raw else ''
         sp['_hash_changed'] = (sp['_resume_hash'] != (sp.get('resume_hash') or ''))
+        # Normalised preferred role title fragments for Stage 1 boosting
+        sp['_pref_role_tokens'] = [
+            r.lower().strip() for r in (sp.get('preferred_roles') or []) if r
+        ]
         if not sp['_tokens']:
             skipped += 1
     if skipped:
@@ -532,10 +570,11 @@ def main() -> None:
         if not sp or not sp['_tokens']:
             continue
 
-        c_tokens     = sp['_tokens']
-        c_text       = sp['_text_lower']
-        resume_text  = sp['_resume_text']
-        hash_changed = sp['_hash_changed']
+        c_tokens       = sp['_tokens']
+        c_text         = sp['_text_lower']
+        resume_text    = sp['_resume_text']
+        hash_changed   = sp['_hash_changed']
+        pref_roles     = sp['_pref_role_tokens']
 
         # ── Resume-hash cache check ────────────────────────────────────────
         # If the seeker's resume hasn't changed since last run, their existing
@@ -550,18 +589,36 @@ def main() -> None:
 
         if use_llm:
             # ── Stage 1: keyword pre-filter → top N jobs ──────────────────
+            # Jobs matching a preferred role title are guaranteed inclusions
+            # (they bypass the keyword threshold so the seeker always sees roles
+            # they actually want, even if their resume wording doesn't align yet).
+            preferred_set: dict[str, dict] = {}
             scored_jobs: list[tuple[int, dict]] = []
             for job in ext_jobs:
                 if not job['_tokens']:
                     continue
                 ks = keyword_score(c_tokens, c_text, job['_tokens'], job.get('category', ''))
-                if ks > 0:
+                is_preferred = title_matches_preferred_role(job.get('title', ''), pref_roles)
+                if is_preferred:
+                    # Give preferred-role jobs a bonus on top of their keyword score
+                    preferred_set[job['id']] = job
+                    scored_jobs.append((min(100, ks + 20), job))
+                elif ks > 0:
                     scored_jobs.append((ks, job))
 
             scored_jobs.sort(key=lambda x: x[0], reverse=True)
-            top_jobs = [job for _, job in scored_jobs[:LLM_PRE_FILTER_TOP_N]]
+            # Deduplicate while preserving order (preferred jobs already boosted above)
+            seen_ids: set[str] = set()
+            top_jobs: list[dict] = []
+            for _, job in scored_jobs:
+                if job['id'] not in seen_ids:
+                    seen_ids.add(job['id'])
+                    top_jobs.append(job)
+                if len(top_jobs) >= LLM_PRE_FILTER_TOP_N:
+                    break
 
-            print(f"  Seeker {uid[:8]}: resume changed → clearing old matches, LLM scoring top {len(top_jobs)} jobs…")
+            pref_count = sum(1 for j in top_jobs if j['id'] in preferred_set)
+            print(f"  Seeker {uid[:8]}: resume changed → clearing old matches, LLM scoring top {len(top_jobs)} jobs… ({pref_count} preferred-role matches)")
             delete_seeker_matches(uid)
 
             # ── Stage 2: LLM recruiter scoring ────────────────────────────

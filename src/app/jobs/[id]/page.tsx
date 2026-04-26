@@ -8,6 +8,7 @@ import {
   ArrowLeft, MapPin, Building2, Calendar, ExternalLink,
   Bookmark, Briefcase, DollarSign, Tag, Wifi, Sparkles,
 } from 'lucide-react'
+import { MatchBattery } from '@/components/MatchBattery'
 
 type JobMatch = {
   match_score: number
@@ -219,23 +220,9 @@ export default function JobDetailPage() {
               <h2 className="text-sm font-bold text-gray-900 uppercase tracking-widest">How You Match</h2>
             </div>
 
-            {/* Tier label + bar */}
+            {/* Battery indicator */}
             <div className="flex items-center gap-3 mb-4">
-              <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className={`h-2 rounded-full transition-all ${
-                    jobMatch.match_score >= 70 ? 'bg-green-500' :
-                    jobMatch.match_score >= 55 ? 'bg-blue-500' : 'bg-gray-400'
-                  }`}
-                  style={{ width: `${Math.min(100, jobMatch.match_score)}%` }}
-                />
-              </div>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
-                jobMatch.match_score >= 70 ? 'bg-green-100 text-green-700' :
-                jobMatch.match_score >= 55 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-              }`}>
-                {jobMatch.match_score >= 70 ? 'Strong Match' : jobMatch.match_score >= 55 ? 'Good Match' : 'Possible Match'}
-              </span>
+              <MatchBattery score={jobMatch.match_score} />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

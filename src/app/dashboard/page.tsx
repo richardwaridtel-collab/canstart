@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin } from 'lucide-react'
+import { MatchBattery } from '@/components/MatchBattery'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
 type Application = { id: string; status: string; created_at: string; opportunity?: { title: string; company_name?: string; type: string } }
@@ -22,15 +23,6 @@ type PickedJob = {
 }
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
 
-/** Convert internal match score (0-100) to a display label + colour class.
- *  We never show the raw number — it comes from a capped-denominator formula
- *  that differs from the live browse-page scorer, so a literal "%" would
- *  conflict with what candidates see elsewhere and mislead them. */
-function matchLabel(score: number): { label: string; cls: string } {
-  if (score >= 70) return { label: 'Strong Match',    cls: 'bg-green-100 text-green-700' }
-  if (score >= 55) return { label: 'Good Match',      cls: 'bg-blue-100 text-blue-700'  }
-  return              { label: 'Possible Match',   cls: 'bg-gray-100 text-gray-600'  }
-}
 
 const statusIcon = (status: string) => {
   if (status === 'accepted') return <CheckCircle size={16} className="text-green-500" />
@@ -248,7 +240,6 @@ export default function DashboardPage() {
                   {pickedJobs.map((pick) => {
                     const job = pick.external_opportunities
                     if (!job) return null
-                    const ml = matchLabel(pick.match_score)
                     const matched = pick.matched_keywords ?? []
                     const missing = pick.missing_keywords ?? []
                     return (
@@ -269,9 +260,7 @@ export default function DashboardPage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
-                              {ml.label}
-                            </span>
+                            <MatchBattery score={pick.match_score} />
                             <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
                           </div>
                         </div>
@@ -451,28 +440,23 @@ export default function DashboardPage() {
                   {candidateMatches.length} candidate{candidateMatches.length !== 1 ? 's' : ''} selected based on your job requirements · refreshed daily at 5:30 AM
                 </p>
                 <div className="space-y-2">
-                  {candidateMatches.map((match, idx) => {
-                    const ml = matchLabel(match.match_score)
-                    return (
-                      <div key={idx} className="flex items-center justify-between p-3.5 bg-green-50 rounded-xl border border-green-100">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-gray-900 text-sm">{match.seeker_name}</p>
-                          <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
-                            {match.seeker_city && <><MapPin size={10} className="inline" />{match.seeker_city}<span className="text-gray-300">·</span></>}
-                            For: <span className="font-medium text-gray-600">{match.opportunity_title}</span>
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3 ml-3 flex-shrink-0">
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${ml.cls}`}>
-                            {ml.label}
-                          </span>
-                          <Link href="/candidates" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
-                            View Profile
-                          </Link>
-                        </div>
+                  {candidateMatches.map((match, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3.5 bg-green-50 rounded-xl border border-green-100">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 text-sm">{match.seeker_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                          {match.seeker_city && <><MapPin size={10} className="inline" />{match.seeker_city}<span className="text-gray-300">·</span></>}
+                          For: <span className="font-medium text-gray-600">{match.opportunity_title}</span>
+                        </p>
                       </div>
-                    )
-                  })}
+                      <div className="flex items-center gap-3 ml-3 flex-shrink-0">
+                        <MatchBattery score={match.match_score} />
+                        <Link href="/candidates" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                          View Profile
+                        </Link>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

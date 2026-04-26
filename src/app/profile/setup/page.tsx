@@ -8,6 +8,75 @@ import { track } from '@vercel/analytics'
 
 const SKILL_SUGGESTIONS = ['Project Management', 'Data Analysis', 'Python', 'SQL', 'Marketing', 'Excel', 'Accounting', 'Customer Service', 'HR', 'Sales', 'Java', 'JavaScript', 'React', 'Figma', 'SEO', 'Content Writing', 'Bookkeeping', 'QuickBooks', 'Recruiting', 'PowerBI', 'Tableau', 'Financial Analysis', 'Supply Chain', 'Logistics', 'Engineering']
 
+// Comprehensive role suggestions across all major industries
+const ROLE_SUGGESTIONS = [
+  // Marketing
+  'Marketing Manager','Marketing Specialist','Marketing Coordinator','Digital Marketing Manager',
+  'Content Marketing Manager','Social Media Manager','Social Media Specialist','Brand Manager',
+  'Marketing Analyst','Growth Marketing Manager','Email Marketing Specialist','SEO Specialist',
+  'SEM Specialist','PPC Specialist','Marketing Director','VP of Marketing','CMO',
+  'Content Creator','Copywriter','Communications Manager','Public Relations Manager',
+  'Community Manager','Influencer Marketing Manager','Performance Marketing Manager',
+  // Sales
+  'Sales Manager','Sales Representative','Account Executive','Account Manager',
+  'Business Development Manager','Business Development Representative','Sales Director',
+  'VP of Sales','Regional Sales Manager','Inside Sales Representative',
+  'Outside Sales Representative','Sales Coordinator','Client Success Manager',
+  'Customer Success Manager','Territory Manager','Channel Sales Manager',
+  // Technology
+  'Software Developer','Software Engineer','Frontend Developer','Backend Developer',
+  'Full Stack Developer','iOS Developer','Android Developer','Mobile Developer',
+  'Data Scientist','Data Analyst','Data Engineer','Machine Learning Engineer',
+  'AI Engineer','DevOps Engineer','Cloud Engineer','Site Reliability Engineer',
+  'QA Engineer','Test Analyst','Product Manager','Product Owner','Scrum Master',
+  'UX Designer','UI Designer','UX/UI Designer','Solutions Architect','Systems Analyst',
+  'IT Manager','IT Support Specialist','Cybersecurity Analyst','Network Engineer',
+  'Database Administrator','Business Analyst','Technical Writer',
+  // Finance & Accounting
+  'Financial Analyst','Senior Financial Analyst','Accountant','Senior Accountant',
+  'CPA','Controller','CFO','Finance Manager','Tax Specialist','Tax Analyst',
+  'Bookkeeper','Payroll Specialist','Accounts Payable Specialist',
+  'Accounts Receivable Specialist','Auditor','Budget Analyst','Investment Analyst',
+  'Risk Analyst','Treasury Analyst','Financial Planner','Insurance Advisor',
+  // Human Resources
+  'HR Manager','HR Generalist','HR Coordinator','Talent Acquisition Specialist',
+  'Recruiter','Senior Recruiter','HR Business Partner','Compensation Analyst',
+  'Benefits Administrator','Training Coordinator','L&D Specialist','HRIS Analyst',
+  'Payroll Manager','HR Director','CHRO','Organizational Development Specialist',
+  'Employee Relations Specialist','Workforce Planning Analyst',
+  // Operations & Project Management
+  'Operations Manager','Operations Coordinator','Operations Analyst',
+  'Supply Chain Manager','Logistics Coordinator','Procurement Specialist',
+  'Purchasing Manager','Inventory Manager','Warehouse Manager',
+  'Quality Assurance Manager','Process Improvement Specialist',
+  'Project Manager','Project Coordinator','Program Manager','PMO Analyst',
+  // Customer Service
+  'Customer Service Representative','Customer Service Manager','Call Centre Agent',
+  'Technical Support Specialist','Help Desk Analyst','Service Desk Analyst',
+  'Client Relations Manager','Support Team Lead',
+  // Design & Creative
+  'Graphic Designer','Visual Designer','Motion Designer','Creative Director',
+  'Art Director','Brand Designer','Video Editor','Photographer',
+  'Multimedia Designer','Web Designer','Product Designer',
+  // Administration
+  'Administrative Assistant','Executive Assistant','Office Manager',
+  'Receptionist','Data Entry Specialist','Operations Assistant','Legal Assistant',
+  // Healthcare
+  'Registered Nurse','Licensed Practical Nurse','Healthcare Administrator',
+  'Medical Office Assistant','Pharmacist','Physiotherapist',
+  'Occupational Therapist','Social Worker','Counsellor','Medical Technologist',
+  // Education
+  'Teacher','Professor','Curriculum Developer','Instructional Designer',
+  'Training Coordinator','ESL Teacher','Academic Advisor','Education Coordinator',
+  // Legal & Compliance
+  'Lawyer','Paralegal','Legal Assistant','Compliance Officer',
+  'Contract Manager','Legal Counsel','Regulatory Affairs Specialist',
+  // Engineering
+  'Civil Engineer','Mechanical Engineer','Electrical Engineer','Chemical Engineer',
+  'Structural Engineer','Environmental Engineer','Project Engineer',
+  'Manufacturing Engineer','Industrial Engineer',
+].sort()
+
 const ACCEPTED_TYPES = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
 const ACCEPTED_EXTENSIONS = '.pdf,.doc,.docx'
 
@@ -90,6 +159,9 @@ export default function ProfileSetupPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [skills, setSkills] = useState<string[]>([])
   const [skillInput, setSkillInput] = useState('')
+  const [preferredRoles, setPreferredRoles] = useState<string[]>([])
+  const [roleInput, setRoleInput] = useState('')
+  const [roleSuggestions, setRoleSuggestions] = useState<string[]>([])
   const [form, setForm] = useState({
     bio: '',
     education: '',
@@ -120,6 +192,7 @@ export default function ProfileSetupPage() {
       const { data } = await supabase.from('seeker_profiles').select('*').eq('user_id', user.id).single()
       if (data) {
         setSkills(data.skills || [])
+        setPreferredRoles(data.preferred_roles || [])
         setForm((f) => ({ ...f, bio: data.bio || '', education: data.education || '', workPreference: data.work_preference || 'any', linkedinUrl: data.linkedin_url || '' }))
         setResumePath(data.resume_path || null)
         setAdditionalDocPath(data.additional_doc_path || null)
@@ -151,6 +224,24 @@ export default function ProfileSetupPage() {
   }
 
   const removeSkill = (skill: string) => setSkills(skills.filter((s) => s !== skill))
+
+  const addRole = (role: string) => {
+    const r = role.trim()
+    if (r && !preferredRoles.includes(r)) setPreferredRoles([...preferredRoles, r])
+    setRoleInput('')
+    setRoleSuggestions([])
+  }
+
+  const removeRole = (role: string) => setPreferredRoles(preferredRoles.filter((r) => r !== role))
+
+  const handleRoleInput = (val: string) => {
+    setRoleInput(val)
+    if (val.length < 2) { setRoleSuggestions([]); return }
+    const q = val.toLowerCase()
+    setRoleSuggestions(
+      ROLE_SUGGESTIONS.filter(r => r.toLowerCase().includes(q) && !preferredRoles.includes(r)).slice(0, 8)
+    )
+  }
 
   const uploadFile = async (file: File, pathPrefix: string): Promise<string | null> => {
     const ext = file.name.split('.').pop()
@@ -188,6 +279,7 @@ export default function ProfileSetupPage() {
         work_preference: form.workPreference,
         linkedin_url: form.linkedinUrl,
         skills,
+        preferred_roles: preferredRoles,
         resume_path: newResumePath,
         additional_doc_path: newAdditionalDocPath,
       }, { onConflict: 'user_id' })
@@ -326,6 +418,66 @@ export default function ProfileSetupPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* ── Job Role Preferences ───────────────────────────────── */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Job Role Preferences
+                </label>
+                <p className="text-xs text-gray-400 mb-3">
+                  Select roles you want to be matched with. Type to search — we&apos;ll prioritise these in your &quot;Picked for You&quot; recommendations.
+                </p>
+                {/* Selected role tags */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {preferredRoles.map((role) => (
+                    <span key={role} className="flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-sm px-3 py-1.5 rounded-full font-medium">
+                      {role}
+                      <button type="button" onClick={() => removeRole(role)} className="hover:text-blue-900">
+                        <X size={14} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                {/* Typeahead input */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={roleInput}
+                    onChange={(e) => handleRoleInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); if (roleSuggestions[0]) addRole(roleSuggestions[0]); else if (roleInput.trim()) addRole(roleInput) }
+                      if (e.key === 'Escape') setRoleSuggestions([])
+                    }}
+                    placeholder="Type a role (e.g. Marketing Manager)..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {roleSuggestions.length > 0 && (
+                    <div className="absolute z-10 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                      {roleSuggestions.map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => addRole(r)}
+                          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Popular role quick-picks */}
+                {preferredRoles.length === 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {['Marketing Manager','Software Developer','Data Analyst','Project Manager','HR Manager','Financial Analyst','Sales Manager','Business Analyst','Graphic Designer','Customer Success Manager'].map((r) => (
+                      <button key={r} type="button" onClick={() => addRole(r)}
+                        className="text-xs text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 px-2.5 py-1 rounded-full transition-colors">
+                        + {r}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="border-t border-gray-100 pt-6 space-y-5">
