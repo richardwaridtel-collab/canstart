@@ -109,7 +109,7 @@ function getAvailableProviders(): ProviderConfig[] {
     providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
   if (process.env.CEREBRAS_API_KEY) {
-    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.3-70b', key: process.env.CEREBRAS_API_KEY })
+    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama-3.3-70b', key: process.env.CEREBRAS_API_KEY })
   }
   return providers
 }
@@ -141,17 +141,30 @@ async function callWithFallback(messages: object[], maxTokens: number): Promise<
   // Shuffle providers so load is distributed randomly across requests
   const shuffled = available.sort(() => Math.random() - 0.5)
 
+  let lastError = ''
   for (const provider of shuffled) {
-    const res = await callLLM(messages, maxTokens, provider)
-    if (res.status !== 429) {
+    let res: Response
+    try {
+      res = await callLLM(messages, maxTokens, provider)
+    } catch (e) {
+      console.warn(`${provider.name} network error — trying next:`, e)
+      lastError = `${provider.name} network error`
+      continue
+    }
+
+    if (res.ok) {
       console.log(`Resume built via ${provider.name}`)
       return { res, provider: provider.name }
     }
-    console.warn(`${provider.name} rate limited (429) — trying next provider`)
+
+    const errText = await res.text()
+    lastError = `${provider.name} ${res.status}`
+    console.warn(`${provider.name} returned ${res.status} — trying next provider. Body: ${errText.slice(0, 200)}`)
   }
 
-  // All providers returned 429
-  throw new Error('ALL_RATE_LIMITED')
+  // All providers failed
+  if (lastError.includes('429')) throw new Error('ALL_RATE_LIMITED')
+  throw new Error(`ALL_FAILED: ${lastError}`)
 }
 
 export async function POST(request: Request) {
@@ -219,25 +232,14 @@ export async function POST(request: Request) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
       if (msg === 'ALL_RATE_LIMITED') {
-        console.warn('All providers rate limited simultaneously')
-        return NextResponse.json({
-          error: 'AI services are under heavy load right now. Please try again in 1–2 minutes.'
-        }, { status: 429 })
+        return NextResponse.json({ error: 'AI services are under heavy load. Please wait a minute and try again.' }, { status: 429 })
+      }
+      if (msg.startsWith('ALL_FAILED')) {
+        console.error('All providers failed:', msg)
+        return NextResponse.json({ error: 'AI service is temporarily unavailable. Please try again in a few seconds.' }, { status: 500 })
       }
       console.error('No AI providers configured:', e)
       return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
-    }
-
-    if (!aiRes.ok) {
-      const err = await aiRes.text()
-      console.error(`${providerName} error ${aiRes.status}:`, err.slice(0, 500))
-      if (aiRes.status === 401) {
-        return NextResponse.json({ error: `AI provider (${providerName}) key is invalid. Please contact support.` }, { status: 500 })
-      }
-      if (aiRes.status === 400) {
-        return NextResponse.json({ error: `AI provider (${providerName}) rejected the request. Please try again.` }, { status: 500 })
-      }
-      return NextResponse.json({ error: `AI service error (${providerName} ${aiRes.status}). Please try again in a few seconds.` }, { status: 500 })
     }
 
     const aiData = await aiRes.json()
