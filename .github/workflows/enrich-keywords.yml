@@ -7,7 +7,7 @@ jobs:
   enrich:
     name: Batch-enrich external_opportunities with LLM keywords
     runs-on: ubuntu-latest
-    timeout-minutes: 30   # ~334 Groq calls × 2.2 s delay ≈ 12 min; 30 min gives headroom
+    timeout-minutes: 45   # ~167 Groq calls × (2.2 s delay + ~2 s response) ≈ 14 min; 45 min gives headroom
 
     steps:
       - name: Checkout repository

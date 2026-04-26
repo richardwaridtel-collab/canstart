@@ -30,7 +30,7 @@ BASE = f"{SUPABASE_URL}/rest/v1"
 
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL    = "llama-3.3-70b-versatile"
-BATCH_SIZE    = 5      # jobs per Groq request
+BATCH_SIZE    = 10     # jobs per Groq request → ~167 calls for 1671 jobs (~8 min total)
 BATCH_DELAY   = 2.2    # seconds between batches → well under 30 RPM free-tier limit
 
 
@@ -87,7 +87,7 @@ def extract_batch(jobs: list[dict]) -> dict[str, list[str]]:
                 "model": GROQ_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
-                "max_tokens": 800,
+                "max_tokens": 1600,
             },
             headers={
                 "Authorization": f"Bearer {GROQ_KEY}",
