@@ -46,6 +46,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [pickedJobs, setPickedJobs] = useState<PickedJob[]>([])
+  const [preferredRoles, setPreferredRoles] = useState<string[]>([])
   const [candidateMatches, setCandidateMatches] = useState<CandidateMatch[]>([])
 
   useEffect(() => {
@@ -90,16 +91,35 @@ export default function DashboardPage() {
         .order('applied_at', { ascending: false })
       setExternalApplications((extApps || []) as ExternalApplication[])
 
-      // Load "Picked for You" pre-computed matches (≥40 internal score)
+      // Load preferred roles + "Picked for You" matches
       try {
-        const { data: picks } = await supabase
-          .from('job_matches')
-          .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
-          .eq('seeker_id', user.id)
-          .gte('match_score', 40)
-          .order('match_score', { ascending: false })
-          .limit(10)
-        if (picks) setPickedJobs(picks as unknown as PickedJob[])
+        const [{ data: sp }, { data: picks }] = await Promise.all([
+          supabase
+            .from('seeker_profiles')
+            .select('preferred_roles')
+            .eq('user_id', user.id)
+            .single(),
+          supabase
+            .from('job_matches')
+            .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
+            .eq('seeker_id', user.id)
+            .gte('match_score', 40)
+            .order('match_score', { ascending: false })
+            .limit(50),
+        ])
+
+        const roles: string[] = (sp?.preferred_roles || []).map((r: string) => r.toLowerCase())
+        setPreferredRoles(roles)
+
+        if (picks) {
+          const filtered = roles.length > 0
+            ? (picks as unknown as PickedJob[]).filter((pick) => {
+                const title = pick.external_opportunities?.title?.toLowerCase() ?? ''
+                return roles.some((role) => title.includes(role))
+              })
+            : (picks as unknown as PickedJob[])
+          setPickedJobs(filtered)
+        }
       } catch { /* table not yet created — silently skip */ }
     } else {
       const { data: jobs } = await supabase
@@ -223,18 +243,20 @@ export default function DashboardPage() {
             </div>
 
             {/* ── Picked for You ─────────────────────────────────────── */}
-            {pickedJobs.length > 0 && (
+            {(pickedJobs.length > 0 || preferredRoles.length > 0) && (
               <div className="bg-white rounded-2xl border border-purple-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-1">
                   <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
-                    <Sparkles size={18} className="text-purple-500" /> Picked for You Only
+                    <Sparkles size={18} className="text-purple-500" /> Picked for You
                   </h2>
                   <Link href="/opportunities" className="text-sm text-purple-600 hover:text-purple-700 flex items-center gap-1">
                     Browse all <ArrowRight size={14} />
                   </Link>
                 </div>
                 <p className="text-xs text-gray-500 mb-4">
-                  {pickedJobs.length} job{pickedJobs.length !== 1 ? 's' : ''} selected based on your resume skills · refreshed daily at 5:30 AM
+                  {pickedJobs.length > 0
+                    ? `${pickedJobs.length} job${pickedJobs.length !== 1 ? 's' : ''} matching your preferred roles · refreshed daily`
+                    : 'No matches found yet for your preferred roles — check back tomorrow or update your resume.'}
                 </p>
                 <div className="space-y-1.5">
                   {pickedJobs.map((pick) => {
