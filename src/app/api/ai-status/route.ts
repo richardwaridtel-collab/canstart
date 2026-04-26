@@ -6,7 +6,7 @@ export async function GET() {
   const providers = {
     groq: !!process.env.GROQ_API_KEY,
     gemini: !!process.env.GEMINI_API_KEY,
-    cerebras: !!process.env.CEREBRAS_API_KEY,
+    mistral: !!process.env.MISTRAL_API_KEY,
     openrouter: !!process.env.OPENROUTER_API_KEY,
   }
 

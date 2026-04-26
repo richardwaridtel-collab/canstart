@@ -94,7 +94,7 @@ ratingReasons: 2–3 short sentences about the candidate's actual background and
 matchGaps: 2–4 specific things the JD requires that the candidate lacks. Be concrete. Empty array [] if match >90%.
 trainingRecommendations: One specific named course/cert per gap (e.g. "Google Project Management Certificate on Coursera"). Empty array [] if no gaps.`
 
-type LLMProvider = 'groq' | 'gemini' | 'cerebras' | 'openrouter'
+type LLMProvider = 'groq' | 'gemini' | 'mistral' | 'openrouter'
 
 interface ProviderConfig {
   name: LLMProvider
@@ -113,8 +113,9 @@ function getAvailableProviders(): ProviderConfig[] {
     // Gemini free tier: 1,000,000 TPM — primary heavy-load relief
     providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
-  if (process.env.CEREBRAS_API_KEY) {
-    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.1-70b', key: process.env.CEREBRAS_API_KEY })
+  if (process.env.MISTRAL_API_KEY) {
+    // Mistral free tier: no daily cap, 1 req/sec throttle
+    providers.push({ name: 'mistral' as LLMProvider, url: 'https://api.mistral.ai/v1/chat/completions', model: 'mistral-small-latest', key: process.env.MISTRAL_API_KEY })
   }
   if (process.env.OPENROUTER_API_KEY) {
     // OpenRouter free tier: routes to free models across multiple providers
