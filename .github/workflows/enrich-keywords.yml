@@ -7,7 +7,7 @@ jobs:
   enrich:
     name: Batch-enrich external_opportunities with LLM keywords
     runs-on: ubuntu-latest
-    timeout-minutes: 45   # ~167 Groq calls × (2.2 s delay + ~2 s response) ≈ 14 min; 45 min gives headroom
+    timeout-minutes: 5    # pure Python tokenizer — completes in under 60 seconds
 
     steps:
       - name: Checkout repository
@@ -27,5 +27,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         run: python scripts/enrich_keywords.py

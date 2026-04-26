@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """
-One-time script: batch-enrich all external_opportunities with LLM keywords.
+One-time script: pre-populate extracted_keywords for all external_opportunities
+using a local Python tokenizer — no LLM, no API calls, no rate limits.
 
-Uses llama-3.1-8b-instant (20,000 TPM free tier) with 5 jobs per request.
-~323 API calls for 1612 jobs → ~20 minutes total.
-
-After this runs once, every job has extracted_keywords cached and the nightly
-compute_matches.py batch never needs to call Groq again.
+Completes in under 60 seconds for 1,600+ jobs.
 
 Usage:
-    SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... GROQ_API_KEY=... python scripts/enrich_keywords.py
+    SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... python scripts/enrich_keywords.py
 """
 
-import json
 import os
 import re
 import time
@@ -21,7 +17,6 @@ import requests
 
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-GROQ_KEY     = os.environ["GROQ_API_KEY"]
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -30,15 +25,108 @@ HEADERS = {
 }
 BASE = f"{SUPABASE_URL}/rest/v1"
 
-GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL    = "llama-3.1-8b-instant"   # 20,000 TPM free tier (vs 6,000 for 70b)
-BATCH_SIZE    = 5      # 5 jobs × ~200 chars desc = ~500 tokens — well under TPM limit
-BATCH_DELAY   = 3.0    # seconds between batches
-DESC_CHARS    = 200    # truncate description — keywords are almost always in the first 200 chars
-MAX_RETRIES   = 3      # retry a batch this many times before skipping it
+# ── Tokenizer (mirrors compute_matches.py) ────────────────────────────────────
+
+SKILL_SYNONYMS = {
+    "js": "javascript", "ts": "typescript",
+    "reactjs": "react", "react.js": "react",
+    "nodejs": "node", "node.js": "node",
+    "vuejs": "vue", "vue.js": "vue",
+    "angularjs": "angular",
+    "nextjs": "next.js",
+    "py": "python",
+    "gcp": "google cloud",
+    "amazon web services": "aws",
+    "k8s": "kubernetes", "kube": "kubernetes",
+    "ml": "machine learning",
+    "dl": "deep learning",
+    "ai": "artificial intelligence",
+    "gen ai": "generative ai",
+    "nlp": "natural language processing",
+    "cv": "computer vision",
+    "llm": "large language model",
+    "bi": "business intelligence",
+    "etl": "data pipeline",
+    "powerbi": "power bi",
+    "ci/cd": "continuous integration",
+    "cicd": "continuous integration",
+    "mssql": "sql server",
+    "psql": "postgresql", "pg": "postgresql",
+    "mongo": "mongodb",
+    "dotnet": ".net", "csharp": "c#",
+    "ux": "user experience", "ui": "user interface",
+    "gh": "github", "gl": "gitlab",
+    "ms office": "microsoft office",
+}
+
+DOMAIN_PHRASES = [
+    "machine learning", "deep learning", "artificial intelligence",
+    "natural language processing", "computer vision", "data science",
+    "data engineering", "software engineer", "software developer",
+    "full stack", "frontend developer", "backend developer",
+    "mobile developer", "devops engineer", "cloud engineer",
+    "data analyst", "business intelligence", "continuous integration",
+    "continuous deployment", "large language model",
+    "digital marketing", "content marketing", "social media marketing",
+    "email marketing", "brand management", "content strategy",
+    "google analytics", "google ads", "facebook ads",
+    "public relations", "media relations", "a/b testing",
+    "financial modeling", "accounts payable", "accounts receivable",
+    "financial analyst", "talent acquisition", "human resources",
+    "employee relations", "workforce planning", "benefits administration",
+    "talent management", "performance management", "labour relations",
+    "organizational development", "business development",
+    "account executive", "account manager", "lead generation",
+    "b2b sales", "b2c sales", "revenue target", "client acquisition",
+    "data analysis", "data warehouse", "power bi", "sql server",
+    "big data", "supply chain", "inventory management",
+    "operations manager", "quality assurance", "process improvement",
+    "six sigma", "vendor management", "graphic design", "ui design",
+    "ux design", "product design", "web design", "user experience",
+    "user interface", "motion graphics", "project management",
+    "agile methodology", "scrum master", "product owner",
+]
+
+STOP_WORDS = {
+    "a","an","the","i","me","my","we","our","you","your","he","him","his",
+    "she","her","it","its","they","them","their","what","which","who","whom",
+    "this","that","these","those","am","is","are","was","were","be","been",
+    "being","have","has","had","do","does","did","will","would","could",
+    "should","might","must","shall","can","may","and","but","if","or","as",
+    "until","while","of","at","by","for","with","about","against","between",
+    "into","through","during","before","after","above","below","to","from",
+    "up","down","in","out","on","off","over","under","again","then","once",
+    "nor","so","yet","both","either","neither","not","only","here","there",
+    "when","where","why","how","all","each","every","few","more","most",
+    "other","some","such","no","same","than","too","very","just","also",
+    "now","etc","within","via","per","new","make","use","get","give","go",
+    "see","take","come","know","role","position","job","work","working",
+    "team","company","looking","seeking","required","requirements",
+    "responsibilities","qualifications","preferred","experience","years",
+    "year","ability","skills","knowledge","strong","excellent","good",
+    "great","well","include","including","includes","like",
+}
+
+def tokenize(text: str) -> list[str]:
+    lower = text.lower()
+    tokens = set()
+
+    # Single tokens
+    for word in re.split(r"[^a-z0-9#+.\-]+", lower):
+        clean = word.strip(".-")
+        clean = SKILL_SYNONYMS.get(clean, clean)
+        if len(clean) >= 3 and clean not in STOP_WORDS and not re.match(r"^\d+$", clean):
+            tokens.add(clean)
+
+    # Multi-word domain phrases
+    for phrase in DOMAIN_PHRASES:
+        if phrase in lower:
+            tokens.add(phrase)
+
+    return sorted(tokens)
 
 
-# ── Fetch all uncached jobs ───────────────────────────────────────────────────
+# ── Fetch / Save ──────────────────────────────────────────────────────────────
 
 def fetch_uncached_jobs() -> list[dict]:
     results, offset, limit = [], 0, 500
@@ -54,6 +142,7 @@ def fetch_uncached_jobs() -> list[dict]:
             },
             timeout=30,
         )
+        r.raise_for_status()
         batch = r.json()
         results.extend(batch)
         if len(batch) < limit:
@@ -62,79 +151,13 @@ def fetch_uncached_jobs() -> list[dict]:
     return results
 
 
-# ── Groq batch extraction ─────────────────────────────────────────────────────
-
-def extract_batch(jobs: list[dict]) -> dict[str, list[str]]:
-    """
-    Send up to BATCH_SIZE jobs in one Groq call.
-    Retries up to MAX_RETRIES times on rate-limit errors with exponential backoff.
-    Returns {job_id: [keyword, ...]} for each job that got a valid response.
-    """
-    numbered = "\n\n".join(
-        f"JOB_{i+1} id={job['id']}\n"
-        f"Title: {job.get('title','')}\n"
-        f"Description: {(job.get('description') or '')[:DESC_CHARS]}"
-        for i, job in enumerate(jobs)
-    )
-
-    prompt = (
-        "For each job below, extract 8-12 specific technical skills, tools, and domain keywords.\n"
-        "Return ONLY a valid JSON object where each key is the job id (the uuid after 'id=') "
-        "and the value is an array of keyword strings.\n"
-        "No markdown, no explanation.\n\n"
-        + numbered
-    )
-
-    wait = 20  # initial backoff in seconds
-    for attempt in range(MAX_RETRIES):
-        try:
-            r = requests.post(
-                GROQ_API_URL,
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 600,
-                },
-                headers={
-                    "Authorization": f"Bearer {GROQ_KEY}",
-                    "Content-Type": "application/json",
-                },
-                timeout=30,
-            )
-
-            if r.status_code == 429:
-                retry_after = int(r.headers.get("retry-after", wait))
-                print(f"\n  ⚠ Rate limited — waiting {retry_after}s (attempt {attempt+1}/{MAX_RETRIES})…")
-                time.sleep(retry_after)
-                wait = min(wait * 2, 120)  # exponential backoff, cap at 2 min
-                continue
-
-            if r.status_code != 200:
-                print(f"\n  ✗ Groq HTTP {r.status_code} — skipping batch")
-                return {}
-
-            content = r.json()["choices"][0]["message"]["content"].strip()
-            content = re.sub(r'^```[a-z]*\n?|```$', '', content, flags=re.MULTILINE).strip()
-            data = json.loads(content)
-            if isinstance(data, dict):
-                return {k: [str(x).strip().lower() for x in v if x]
-                        for k, v in data.items() if isinstance(v, list)}
-
-        except Exception as e:
-            print(f"\n  ✗ Groq error: {e}")
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(wait)
-
-    return {}
-
-
-def save_keywords(job_id: str, keywords: list[str]) -> None:
-    requests.patch(
-        f"{BASE}/external_opportunities?id=eq.{job_id}",
-        json={"extracted_keywords": keywords},
-        headers=HEADERS,
-        timeout=10,
+def save_batch(updates: list[dict]) -> None:
+    """Bulk-save up to 500 rows via Supabase upsert."""
+    requests.post(
+        f"{BASE}/external_opportunities",
+        json=updates,
+        headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
+        timeout=30,
     )
 
 
@@ -150,24 +173,32 @@ def main() -> None:
         print("  All jobs already enriched — nothing to do.")
         return
 
+    print("  Tokenizing locally (no API calls)…\n")
+
+    UPSERT_BATCH = 200
     saved = 0
-    batches = [jobs[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
-    print(f"  {len(batches)} batches of up to {BATCH_SIZE} jobs each")
-    print(f"  Model: {GROQ_MODEL} (20k TPM free tier)\n")
+    updates: list[dict] = []
 
-    for idx, batch in enumerate(batches, 1):
-        results = extract_batch(batch)
-        for job in batch:
-            kws = results.get(job["id"])
-            if kws:
-                save_keywords(job["id"], kws)
-                saved += 1
+    for i, job in enumerate(jobs, 1):
+        text = f"{job.get('title', '')} {job.get('description', '') or ''}"
+        keywords = tokenize(text)
 
-        pct = round(idx / len(batches) * 100)
-        print(f"  Batch {idx}/{len(batches)} ({pct}%) — {saved}/{total} saved", end="\r")
-        time.sleep(BATCH_DELAY)
+        updates.append({"id": job["id"], "extracted_keywords": keywords})
 
-    print(f"\n\n✓ Done — {saved}/{total} jobs enriched with LLM keywords.")
+        if len(updates) >= UPSERT_BATCH:
+            save_batch(updates)
+            saved += len(updates)
+            updates = []
+
+        pct = round(i / total * 100)
+        print(f"  {i}/{total} ({pct}%) tokenized…", end="\r")
+
+    # flush remainder
+    if updates:
+        save_batch(updates)
+        saved += len(updates)
+
+    print(f"\n\n✓ Done — {saved}/{total} jobs enriched with keywords.")
     print("  The nightly compute_matches.py will now use cached keywords automatically.")
 
 
