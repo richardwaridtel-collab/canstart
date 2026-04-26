@@ -18,7 +18,7 @@ type PickedJob = {
   missing_keywords: string[]
   match_reason?: string | null
   external_opportunities: {
-    id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string
+    id: string; title: string; company: string; city: string; work_mode: string; category: string; posted_at?: string; synced_at: string; salary_min?: number; salary_max?: number
   } | null
 }
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
@@ -101,7 +101,7 @@ export default function DashboardPage() {
             .single(),
           supabase
             .from('job_matches')
-            .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, posted_at, synced_at)')
+            .select('match_score, job_id, matched_keywords, missing_keywords, match_reason, external_opportunities(id, title, company, city, work_mode, category, salary_min, salary_max, posted_at, synced_at)')
             .eq('seeker_id', user.id)
             .gte('match_score', 40)
             .order('match_score', { ascending: false })
@@ -258,18 +258,33 @@ export default function DashboardPage() {
                     ? `${pickedJobs.length} job${pickedJobs.length !== 1 ? 's' : ''} matching your preferred roles · refreshed daily`
                     : 'No matches found yet for your preferred roles — check back tomorrow or update your resume.'}
                 </p>
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {pickedJobs.map((pick) => {
                     const job = pick.external_opportunities
                     if (!job) return null
+                    const salary = job.salary_min && job.salary_max
+                      ? `$${Math.round(job.salary_min / 1000)}K–$${Math.round(job.salary_max / 1000)}K/yr`
+                      : job.salary_min
+                        ? `$${Math.round(job.salary_min / 1000)}K+/yr`
+                        : null
                     return (
                       <Link
                         key={pick.job_id}
                         href={`/jobs/${job.id}`}
-                        className="flex items-center justify-between px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
+                        className="flex items-center justify-between px-3.5 py-3 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-100 transition-colors group"
                       >
-                        <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
-                        <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors flex-shrink-0 ml-2" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm truncate">{job.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="font-medium text-gray-700">{job.company}</span>
+                            <span className="text-gray-300">·</span>
+                            <span className="flex items-center gap-0.5"><MapPin size={10} />{job.city}</span>
+                            <span className="text-gray-300">·</span>
+                            <span className="capitalize">{job.work_mode}</span>
+                            {salary && <><span className="text-gray-300">·</span><span className="text-green-600 font-medium">{salary}</span></>}
+                          </p>
+                        </div>
+                        <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors flex-shrink-0 ml-3" />
                       </Link>
                     )
                   })}
