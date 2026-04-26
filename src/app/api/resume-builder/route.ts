@@ -111,10 +111,10 @@ function getAvailableProviders(): ProviderConfig[] {
   }
   if (process.env.GEMINI_API_KEY) {
     // Gemini free tier: 1,000,000 TPM — primary heavy-load relief
-    providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-1.5-flash', key: process.env.GEMINI_API_KEY })
+    providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
   if (process.env.CEREBRAS_API_KEY) {
-    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama-3.3-70b', key: process.env.CEREBRAS_API_KEY })
+    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.3-70b', key: process.env.CEREBRAS_API_KEY })
   }
   if (process.env.OPENROUTER_API_KEY) {
     // OpenRouter free tier: routes to free models across multiple providers
