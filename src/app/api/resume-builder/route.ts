@@ -91,28 +91,65 @@ ratingReasons: 2–3 short sentences about the candidate's actual background and
 matchGaps: 2–4 specific things the JD requires that the candidate lacks. Be concrete. Empty array [] if match >90%.
 trainingRecommendations: One specific named course/cert per gap (e.g. "Google Project Management Certificate on Coursera"). Empty array [] if no gaps.`
 
-async function callGroq(body: object, retries = 3): Promise<Response> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+type LLMProvider = 'groq' | 'gemini'
+
+async function callLLM(messages: object[], maxTokens: number, provider: LLMProvider): Promise<Response> {
+  if (provider === 'groq') {
+    return fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: maxTokens,
+        temperature: 0.4,
+        messages,
+      }),
     })
-    if (res.status !== 429 || attempt === retries) return res
-    // Exponential backoff: 3s, 6s
-    await new Promise(r => setTimeout(r, attempt * 3000))
+  } else {
+    // Gemini via OpenAI-compatible endpoint — free tier: 1M TPM
+    return fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GEMINI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gemini-2.0-flash',
+        max_tokens: maxTokens,
+        temperature: 0.4,
+        messages,
+      }),
+    })
   }
-  // unreachable but satisfies TS
-  throw new Error('Retry loop exhausted')
+}
+
+async function callWithFallback(messages: object[], maxTokens: number): Promise<{ res: Response; provider: LLMProvider }> {
+  const hasGroq = !!process.env.GROQ_API_KEY
+  const hasGemini = !!process.env.GEMINI_API_KEY
+
+  // Try Groq first
+  if (hasGroq) {
+    const res = await callLLM(messages, maxTokens, 'groq')
+    if (res.status !== 429) return { res, provider: 'groq' }
+    console.warn('Groq rate limited (429) — falling back to Gemini')
+  }
+
+  // Fall back to Gemini on Groq 429 or if Groq key missing
+  if (hasGemini) {
+    const res = await callLLM(messages, maxTokens, 'gemini')
+    return { res, provider: 'gemini' }
+  }
+
+  throw new Error('No AI provider available. Set GROQ_API_KEY and/or GEMINI_API_KEY.')
 }
 
 export async function POST(request: Request) {
   try {
-    if (!process.env.GROQ_API_KEY) {
-      console.error('GROQ_API_KEY is not configured')
+    if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
+      console.error('No AI provider keys configured (GROQ_API_KEY or GEMINI_API_KEY)')
       return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
     }
 
@@ -159,38 +196,42 @@ export async function POST(request: Request) {
     const resumeTextTrimmed = resumeText.slice(0, 6000)
     const jobDescTrimmed = jobDescription.slice(0, 4000)
 
-    const groqRes = await callGroq({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 6000,
-      temperature: 0.4,
-      messages: [
-        { role: 'system', content: RESUME_PROMPT },
-        {
-          role: 'user',
-          content: `=== CANDIDATE'S RESUME ===\n${resumeTextTrimmed}\n\n=== JOB DESCRIPTION ===\n${jobDescTrimmed}\n\nReturn the tailored resume as valid JSON only.`,
-        },
-      ],
-    })
+    const messages = [
+      { role: 'system', content: RESUME_PROMPT },
+      {
+        role: 'user',
+        content: `=== CANDIDATE'S RESUME ===\n${resumeTextTrimmed}\n\n=== JOB DESCRIPTION ===\n${jobDescTrimmed}\n\nReturn the tailored resume as valid JSON only.`,
+      },
+    ]
 
-    if (!groqRes.ok) {
-      const err = await groqRes.text()
-      console.error('Groq API error:', groqRes.status, err)
-      if (groqRes.status === 429) {
+    let aiRes: Response
+    let provider: LLMProvider
+    try {
+      ;({ res: aiRes, provider } = await callWithFallback(messages, 6000))
+    } catch (e) {
+      console.error('All AI providers failed:', e)
+      return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
+    }
+
+    if (!aiRes.ok) {
+      const err = await aiRes.text()
+      console.error(`${provider} API error:`, aiRes.status, err)
+      if (aiRes.status === 429) {
         return NextResponse.json({
-          error: 'The AI service is currently busy. Please wait 30 seconds and try again.'
+          error: 'Both AI services are currently busy. Please wait a minute and try again.'
         }, { status: 429 })
       }
-      if (groqRes.status === 401) {
+      if (aiRes.status === 401) {
         return NextResponse.json({ error: 'Resume builder configuration error. Please contact support.' }, { status: 500 })
       }
       return NextResponse.json({ error: 'AI service error. Please try again in a few seconds.' }, { status: 500 })
     }
 
-    const groqData = await groqRes.json()
-    const raw = groqData.choices?.[0]?.message?.content || ''
+    const aiData = await aiRes.json()
+    const raw = aiData.choices?.[0]?.message?.content || ''
 
     if (!raw) {
-      console.error('Empty Groq response. finish_reason:', groqData.choices?.[0]?.finish_reason)
+      console.error(`Empty response from ${provider}. finish_reason:`, aiData.choices?.[0]?.finish_reason)
       return NextResponse.json({ error: 'No response from AI. Please try again.' }, { status: 500 })
     }
 
@@ -217,7 +258,7 @@ export async function POST(request: Request) {
       resume = JSON.parse(jsonStr)
     } catch (parseErr) {
       console.error('JSON parse error:', parseErr)
-      const finishReason = groqData.choices?.[0]?.finish_reason
+      const finishReason = aiData.choices?.[0]?.finish_reason
       if (finishReason === 'length') {
         return NextResponse.json({
           error: 'Your resume or job description is very long. Please shorten the job description to the key requirements and try again.'
