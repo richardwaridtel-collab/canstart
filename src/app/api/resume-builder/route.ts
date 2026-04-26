@@ -271,6 +271,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Could not extract text from the resume. Please try a different file.' }, { status: 400 })
     }
 
+    if (!process.env.GROQ_API_KEY) {
+      console.error('GROQ_API_KEY is not set')
+      return NextResponse.json({ error: 'Resume builder is not configured. Please contact support.' }, { status: 500 })
+    }
+
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -279,7 +284,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.4,
         messages: [
           {
@@ -296,19 +301,58 @@ export async function POST(request: Request) {
 
     if (!groqRes.ok) {
       const err = await groqRes.text()
-      console.error('Groq error:', err)
-      return NextResponse.json({ error: 'AI service error. Please try again.' }, { status: 500 })
+      console.error('Groq API error:', groqRes.status, err)
+      if (groqRes.status === 429) {
+        return NextResponse.json({ error: 'Too many requests. Please wait a moment and try again.' }, { status: 429 })
+      }
+      if (groqRes.status === 401) {
+        return NextResponse.json({ error: 'Resume builder configuration error. Please contact support.' }, { status: 500 })
+      }
+      return NextResponse.json({ error: 'AI service error. Please try again in a few seconds.' }, { status: 500 })
     }
 
     const groqData = await groqRes.json()
     const raw = groqData.choices?.[0]?.message?.content || ''
 
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
+    if (!raw) {
+      console.error('Empty response from Groq. finish_reason:', groqData.choices?.[0]?.finish_reason)
+      return NextResponse.json({ error: 'No response from AI. Please try again.' }, { status: 500 })
+    }
+
+    // Extract JSON — handle plain JSON or ```json ... ``` code blocks
+    let jsonStr: string | null = null
+    const codeBlockMatch = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/)
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1]
+    } else {
+      // Find the outermost { ... } block
+      const start = raw.indexOf('{')
+      const end = raw.lastIndexOf('}')
+      if (start !== -1 && end !== -1 && end > start) {
+        jsonStr = raw.slice(start, end + 1)
+      }
+    }
+
+    if (!jsonStr) {
+      console.error('No JSON found in response. Raw (first 500):', raw.slice(0, 500))
       return NextResponse.json({ error: 'Failed to generate resume. Please try again.' }, { status: 500 })
     }
 
-    const resume = JSON.parse(jsonMatch[0])
+    let resume
+    try {
+      resume = JSON.parse(jsonStr)
+    } catch (parseErr) {
+      console.error('JSON parse error:', parseErr, 'Raw snippet (last 200):', jsonStr.slice(-200))
+      // Check if likely truncated due to token limit
+      const finishReason = groqData.choices?.[0]?.finish_reason
+      if (finishReason === 'length') {
+        return NextResponse.json({
+          error: 'Your resume is very long and hit the generation limit. Please try shortening the job description, or use the "Paste text instead" option to paste just the most relevant parts of your resume.'
+        }, { status: 500 })
+      }
+      return NextResponse.json({ error: 'Failed to parse the generated resume. Please try again.' }, { status: 500 })
+    }
+
     return NextResponse.json({ resume })
   } catch (err) {
     console.error('Resume builder error:', err)
