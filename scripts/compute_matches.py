@@ -49,7 +49,7 @@ BASE = f"{SUPABASE_URL}/rest/v1"
 GROQ_API_URL  = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_KEY      = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL    = "llama-3.1-8b-instant"   # 20k TPM free tier — highest limits
-GROQ_DELAY    = 2.0                       # seconds between requests → ~30 RPM (safe)
+GROQ_DELAY    = 4.0                       # seconds between requests → ~15 RPM (avoids free-tier rate limits)
 GROQ_MAX_CALLS_PER_RUN = 300             # cap total LLM calls per nightly run
                                           # 300 × 2 s ≈ 10 min — fits 20-min window
 
