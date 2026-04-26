@@ -2,7 +2,7 @@ name: Compute Match Scores
 
 on:
   schedule:
-    - cron: '30 9 * * *'   # 9:30 AM UTC = 5:30 AM EDT, every day
+    - cron: '0 */4 * * *'   # Every 4 hours: 12am, 4am, 8am, 12pm, 4pm, 8pm UTC
   workflow_dispatch:         # Allow manual trigger from GitHub Actions UI
 
 jobs:
