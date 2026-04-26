@@ -109,7 +109,7 @@ function getAvailableProviders(): ProviderConfig[] {
     providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
   if (process.env.CEREBRAS_API_KEY) {
-    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama-3.3-70b', key: process.env.CEREBRAS_API_KEY })
+    providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama3.3-70b', key: process.env.CEREBRAS_API_KEY })
   }
   return providers
 }
@@ -135,6 +135,8 @@ async function callWithFallback(messages: object[], maxTokens: number): Promise<
   if (available.length === 0) {
     throw new Error('No AI provider keys configured.')
   }
+
+  console.log(`Available providers: ${available.map(p => p.name).join(', ')}`)
 
   // Shuffle providers so load is distributed randomly across requests
   const shuffled = available.sort(() => Math.random() - 0.5)
@@ -228,11 +230,14 @@ export async function POST(request: Request) {
 
     if (!aiRes.ok) {
       const err = await aiRes.text()
-      console.error(`${providerName} API error:`, aiRes.status, err)
+      console.error(`${providerName} error ${aiRes.status}:`, err.slice(0, 500))
       if (aiRes.status === 401) {
-        return NextResponse.json({ error: `AI provider (${providerName}) authentication failed. Please contact support.` }, { status: 500 })
+        return NextResponse.json({ error: `AI provider (${providerName}) key is invalid. Please contact support.` }, { status: 500 })
       }
-      return NextResponse.json({ error: 'AI service error. Please try again in a few seconds.' }, { status: 500 })
+      if (aiRes.status === 400) {
+        return NextResponse.json({ error: `AI provider (${providerName}) rejected the request. Please try again.` }, { status: 500 })
+      }
+      return NextResponse.json({ error: `AI service error (${providerName} ${aiRes.status}). Please try again in a few seconds.` }, { status: 500 })
     }
 
     const aiData = await aiRes.json()
