@@ -5,11 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
 import OpportunityCard from '@/components/OpportunityCard'
-import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, Target, CheckCircle, X, Building2, Calendar, Sparkles, ChevronDown } from 'lucide-react'
+import { Search, MapPin, SlidersHorizontal, ExternalLink, RefreshCw, Briefcase, Star, Lock, CheckCircle, X, Building2, Calendar, ChevronDown } from 'lucide-react'
 import { track } from '@vercel/analytics'
 import Link from 'next/link'
-import { matchesKeyword, scoreKeywords } from '@/lib/keywordMatcher'
-import type { ExtractedKeywords } from '@/app/api/extract-keywords/route'
+import { scoreKeywords } from '@/lib/keywordMatcher'
+import { MatchBattery } from '@/components/MatchBattery'
 
 const CITIES = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
 const TYPES = ['All Types', 'volunteer', 'micro-internship', 'paid']
@@ -240,7 +240,6 @@ function computeJobMatch(
   _workMode: string,
   _jobCity: string,
   jobCategory: string = '',
-  llmKeywords?: ExtractedKeywords | null,
 ): number {
   if (!seeker) return 0
 
@@ -249,32 +248,11 @@ function computeJobMatch(
   const candidateText = hasResume ? resumeText : seeker.skills.join(' ').toLowerCase()
 
   // ── Factor 1: Domain-specific keyword coverage (70 pts) ──────────────────────
-  let keywords: Array<{ keyword: string; required: boolean }>
+  const keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
+    .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
 
-  if (llmKeywords && (llmKeywords.required_skills.length + llmKeywords.preferred_skills.length + llmKeywords.keywords.length) > 0) {
-    // Use LLM-extracted keywords (higher quality, job-specific)
-    keywords = [
-      ...llmKeywords.required_skills.map(k => ({ keyword: k, required: true })),
-      ...llmKeywords.preferred_skills.map(k => ({ keyword: k, required: false })),
-      ...llmKeywords.keywords.map(k => ({ keyword: k, required: false })),
-    ].filter(({ keyword }) => keyword.trim().length > 0 && !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
-  } else {
-    // Fall back to curated extraction
-    keywords = extractJobKeywords(jobTitle, jobDescription, requiredSkills)
-      .filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
-  }
-
-  // Word-boundary matching (prevents "SQL" matching "MySQL", "Java" matching "JavaScript")
   const { weightedMatched, weightedTotal } = scoreKeywords(candidateText, keywords)
-
-  // If using curated extraction, also check explicit requiredSkills with word-boundary
-  if (!llmKeywords) {
-    // already handled inside extractJobKeywords — nothing extra needed
-  }
-
-  // Confidence factor: if fewer than 6 domain keywords found, penalise score
-  const uniqueKeywordCount = keywords.length
-  const confidenceFactor = Math.min(1, uniqueKeywordCount / 10)
+  const confidenceFactor = Math.min(1, keywords.length / 10)
   const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
   const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
 
@@ -289,8 +267,8 @@ function computeCanstartMatch(seeker: SeekerProfile | null, opp: Opportunity): n
   return computeJobMatch(seeker, opp.title, opp.description || '', opp.skills_required || [], opp.work_mode, opp.city, cat)
 }
 
-function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob, llmKeywords?: ExtractedKeywords | null): number {
-  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city, job.category, llmKeywords)
+function computeExternalMatch(seeker: SeekerProfile | null, job: ExternalJob): number {
+  return computeJobMatch(seeker, job.title, job.description || '', [], job.work_mode, job.city, job.category)
 }
 
 // ─── ATS Keyword Analysis ────────────────────────────────────────────────────
@@ -366,29 +344,6 @@ const KNOWN_SKILLS = [
   'critical thinking','attention to detail','time management',
 ]
 
-// How to bridge common missing skills using existing experience
-const SKILL_BRIDGES: Record<string, string> = {
-  'salesforce': 'Any CRM (HubSpot, Zoho, Dynamics) is transferable. Highlight it + note you can ramp up on Salesforce.',
-  'hubspot': 'Mailchimp, Marketo or any marketing automation experience is directly relevant.',
-  'power bi': 'Tableau or Excel pivot/charts experience shows the same analytical thinking.',
-  'tableau': 'Power BI or Excel dashboard experience demonstrates equivalent data visualization skills.',
-  'google analytics': 'General web/marketing analytics experience qualifies. Free GA4 cert takes ~4 hours.',
-  'python': 'SQL, Excel (VBA/formulas), or R shows analytical programming aptitude.',
-  'sql': 'Excel data analysis or Access database experience bridges this; SQL basics take 2-3 weeks to learn.',
-  'pmp': 'Highlight project coordination, timelines managed, and budget ownership — you may qualify without the cert.',
-  'agile': 'Any iterative work, sprint-based delivery, or project coordination qualifies as agile experience.',
-  'scrum': 'Agile project experience, sprint planning, or daily standups — describe these explicitly.',
-  'seo': 'Content writing, keyword research, or digital marketing experience shows SEO awareness.',
-  'financial modeling': 'Excel skills combined with financial reporting experience is a strong bridge.',
-  'budgeting': 'Any experience managing costs, tracking expenses, or P&L responsibility counts.',
-  'bilingual': 'Even conversational proficiency in a second language is worth noting.',
-  'french': 'Basic French significantly improves candidacy in many Canadian markets. Mention any level.',
-  'cross-functional collaboration': 'Describe any projects where you worked with multiple departments.',
-  'stakeholder management': 'Client communication, executive reporting, or vendor relations all qualify.',
-  'data analysis': 'Excel pivot tables, reporting, or any quantitative work demonstrates data analysis skills.',
-  'change management': 'Any experience implementing new processes or systems is relevant.',
-  'procurement': 'Vendor relations, purchasing, or supplier management experience bridges this gap.',
-}
 
 // Extract keywords from job using curated list + requirement patterns
 function extractJobKeywords(title: string, description: string, requiredSkills: string[] = []): Array<{ keyword: string; required: boolean }> {
@@ -431,197 +386,6 @@ function extractJobKeywords(title: string, description: string, requiredSkills: 
     .slice(0, 28)
 }
 
-function ATSPanel({ resumeText, seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory, llmKeywords, llmLoading }: {
-  resumeText: string; seekerProfile: SeekerProfile | null; jobTitle: string; jobDescription: string; requiredSkills?: string[]; workMode: string; jobCity: string; jobCategory: string; llmKeywords?: ExtractedKeywords | null; llmLoading?: boolean
-}) {
-  // Prefer LLM-extracted keywords; fall back to curated extraction
-  const usingLLM = llmKeywords && (llmKeywords.required_skills.length + llmKeywords.preferred_skills.length + llmKeywords.keywords.length) > 0
-  const keywords: Array<{ keyword: string; required: boolean }> = usingLLM
-    ? [
-        ...llmKeywords!.required_skills.map(k => ({ keyword: k, required: true })),
-        ...llmKeywords!.preferred_skills.map(k => ({ keyword: k, required: false })),
-        ...llmKeywords!.keywords.map(k => ({ keyword: k, required: false })),
-      ].filter(kw => kw.keyword.trim())
-    : extractJobKeywords(jobTitle, jobDescription, requiredSkills)
-
-  if (!keywords.length && !llmLoading) return null
-
-  // No resume — show keywords only, prompt to upload
-  if (!resumeText || resumeText.length < 50) {
-    return (
-      <div className="mt-3 pt-3 border-t border-dashed border-purple-100">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-            <Target size={12} className="text-purple-500" /> ATS Keywords for this role
-            {usingLLM && <span className="flex items-center gap-0.5 text-[10px] text-purple-500 font-normal"><Sparkles size={9} /> AI</span>}
-            {llmLoading && <span className="text-[10px] text-gray-400 font-normal animate-pulse">extracting…</span>}
-          </span>
-          <a href="/profile/setup" className="text-[11px] text-purple-600 hover:underline font-medium">Upload resume to check match →</a>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {keywords.slice(0, 12).map(({ keyword, required }) => (
-            <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-red-50 text-red-700 border-red-200' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-              {required && '★ '}{keyword}
-            </span>
-          ))}
-        </div>
-        <p className="text-[10px] text-gray-400 mt-2">★ = explicitly required · Upload resume for full match analysis</p>
-      </div>
-    )
-  }
-
-  // Word-boundary matching (from keywordMatcher.ts — prevents false substring matches)
-  const { matched, missing } = scoreKeywords(resumeText, keywords)
-  const atsPct = keywords.length > 0 ? Math.round((matched.length / keywords.length) * 100) : 0
-
-  // Unified overall score
-  const overallPct = computeJobMatch(seekerProfile, jobTitle, jobDescription, requiredSkills, workMode, jobCity, jobCategory, llmKeywords)
-
-  // Score breakdown
-  const domainKeywords = keywords.filter(({ keyword }) => !SOFT_SKILLS_EXCLUDED.has(keyword.toLowerCase()))
-  const { weightedMatched, weightedTotal } = scoreKeywords(resumeText, domainKeywords)
-  const confidenceFactor = Math.min(1, domainKeywords.length / 10)
-  const rawMatchRatio = weightedTotal > 0 ? weightedMatched / weightedTotal : 0
-  const keywordScore = Math.round(rawMatchRatio * confidenceFactor * 70)
-  const industryScore = computeIndustryScore(resumeText.toLowerCase(), jobCategory)
-
-  const barColor = overallPct >= 75 ? 'bg-green-500' : overallPct >= 55 ? 'bg-yellow-400' : overallPct >= 35 ? 'bg-orange-400' : 'bg-red-400'
-
-  // Separate required missing keywords (critical gaps) from optional
-  const missingRequired = missing.filter(({ required }) => required)
-  const missingOptional = missing.filter(({ required }) => !required)
-  const bridgeable = missing.filter(({ keyword }) => SKILL_BRIDGES[keyword.toLowerCase()])
-
-  return (
-    <div className="mt-3 pt-3 border-t border-dashed border-purple-100 space-y-3">
-
-      {/* Overall match score + bar */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-gray-700 flex items-center gap-1">
-            <Target size={12} className="text-purple-500" /> Match Analysis
-            {usingLLM && (
-              <span className="flex items-center gap-0.5 bg-purple-50 text-purple-600 text-[10px] px-1.5 py-0.5 rounded-full border border-purple-200 font-medium">
-                <Sparkles size={9} /> AI keywords
-              </span>
-            )}
-            {llmLoading && <span className="text-[10px] text-gray-400 animate-pulse">analyzing…</span>}
-          </span>
-          <span className="text-xs font-bold text-gray-600">{overallPct}% overall match</span>
-        </div>
-        <div className="h-2 bg-gray-100 rounded-full overflow-hidden mb-2">
-          <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${overallPct}%` }} />
-        </div>
-
-        {/* Score breakdown */}
-        <div className="grid grid-cols-2 gap-1.5 mb-2">
-          {[
-            { label: 'Skills & Keywords', score: keywordScore, max: 70 },
-            { label: 'Industry Fit', score: industryScore, max: 30 },
-          ].map(({ label, score, max }) => (
-            <div key={label} className="bg-gray-50 rounded-lg px-2 py-1.5">
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] text-gray-500">{label}</span>
-                <span className="text-[10px] font-bold text-gray-700">{score}/{max}</span>
-              </div>
-              <div className="h-1 bg-gray-200 rounded-full mt-1 overflow-hidden">
-                <div className={`h-full rounded-full ${score >= max * 0.7 ? 'bg-green-400' : score >= max * 0.4 ? 'bg-yellow-400' : 'bg-red-400'}`} style={{ width: `${(score / max) * 100}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-
-      </div>
-
-      {/* ATS keyword breakdown */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">ATS Keywords</span>
-          <span className="text-[10px] text-gray-400">{matched.length}/{keywords.length} found · {atsPct}%</span>
-        </div>
-
-        {/* Matched */}
-        {matched.length > 0 && (
-          <div className="mb-2">
-            <p className="text-[10px] text-green-600 font-semibold mb-1">✓ Found in your resume</p>
-            <div className="flex flex-wrap gap-1">
-              {matched.map(({ keyword, required }) => (
-                <span key={keyword} className={`text-[11px] px-2 py-0.5 rounded-full border ${required ? 'bg-green-100 text-green-800 border-green-300 font-semibold' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                  {required && '★ '}{keyword}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Critical missing (required) */}
-        {missingRequired.length > 0 && (
-          <div className="mb-2">
-            <p className="text-[10px] text-red-600 font-semibold mb-1">★ Critical gaps — required by employer</p>
-            <div className="flex flex-wrap gap-1">
-              {missingRequired.map(({ keyword }) => (
-                <span key={keyword} className="text-[11px] px-2 py-0.5 rounded-full border bg-red-100 text-red-700 border-red-300 font-semibold">
-                  {keyword}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Optional missing */}
-        {missingOptional.length > 0 && (
-          <div className="mb-2">
-            <p className="text-[10px] text-gray-500 font-semibold mb-1">✗ Not found — consider adding if relevant</p>
-            <div className="flex flex-wrap gap-1">
-              {missingOptional.slice(0, 10).map(({ keyword }) => (
-                <span key={keyword} className="text-[11px] px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200">
-                  {keyword}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Bridgeable gaps with tips */}
-      {bridgeable.length > 0 && (
-        <div>
-          <p className="text-[10px] text-amber-600 uppercase tracking-wide font-semibold mb-1.5">💡 Quick wins — bridge these gaps</p>
-          <div className="space-y-1.5">
-            {bridgeable.slice(0, 3).map(({ keyword }) => (
-              <div key={keyword} className="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                <p className="text-[11px] font-semibold text-amber-800">{keyword}</p>
-                <p className="text-[11px] text-amber-700 mt-0.5">{SKILL_BRIDGES[keyword.toLowerCase()]}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-function MatchBar({ pct, fromResume }: { pct: number; fromResume: boolean }) {
-  const color = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
-  const label = pct >= 70 ? 'Strong Match' : pct >= 40 ? 'Good Match' : 'Partial Match'
-  const textColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-orange-500'
-  return (
-    <div className="mt-3 pt-3 border-t border-gray-100">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-400 flex items-center gap-1">
-          Skills &amp; Experience Match
-          {fromResume && <span className="bg-green-100 text-green-700 text-[10px] px-1.5 py-0.5 rounded-full font-medium">resume</span>}
-        </span>
-        <span className={`text-xs font-semibold ${textColor}`}>{pct}% · {label}</span>
-      </div>
-      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  )
-}
 
 // ── Multi-select dropdown ─────────────────────────────────────────────────────
 
@@ -734,41 +498,6 @@ function OpportunitiesInner() {
   const [markingApplied, setMarkingApplied] = useState<string | null>(null)
   const [userId, setUserId] = useState<string | null>(null)
   const [selectedJob, setSelectedJob] = useState<ExternalJob | null>(null)
-
-  // LLM keyword cache: jobId → extracted keywords (session-scoped, fetched on demand)
-  const llmKeywordsCache = useRef<Map<string, ExtractedKeywords>>(new Map())
-  const llmFetchingRef = useRef<Set<string>>(new Set())
-  // forceUpdate triggers re-render after LLM keywords arrive (refs don't cause re-renders alone)
-  const [llmTick, setLlmTick] = useState(0)
-
-  const getLLMKeywords = (jobId: string): ExtractedKeywords | null => {
-    void llmTick // ensure component re-renders when cache updates
-    return llmKeywordsCache.current.get(jobId) ?? null
-  }
-
-  const isLLMFetching = (jobId: string): boolean => {
-    void llmTick
-    return llmFetchingRef.current.has(jobId)
-  }
-
-  const fetchLLMKeywords = async (job: ExternalJob) => {
-    if (!job.description || llmKeywordsCache.current.has(job.id) || llmFetchingRef.current.has(job.id)) return
-    llmFetchingRef.current.add(job.id)
-    setLlmTick(t => t + 1)
-    try {
-      const res = await fetch('/api/extract-keywords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: job.description, title: job.title }),
-      })
-      if (res.ok) {
-        const data: ExtractedKeywords = await res.json()
-        llmKeywordsCache.current.set(job.id, data)
-      }
-    } catch { /* silent fail — fall back to curated extraction */ }
-    llmFetchingRef.current.delete(job.id)
-    setLlmTick(t => t + 1)
-  }
 
   useEffect(() => {
     checkAuth()
@@ -1062,8 +791,9 @@ function OpportunitiesInner() {
                   <div key={opp.id} className="flex flex-col">
                     <OpportunityCard opportunity={opp} />
                     {seekerProfile && (
-                      <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-4">
-                        <ATSPanel resumeText={seekerProfile.resume_text || ''} seekerProfile={seekerProfile} jobTitle={opp.title} jobDescription={opp.description || ''} requiredSkills={opp.skills_required} workMode={opp.work_mode} jobCity={opp.city} jobCategory={(opp as unknown as { category?: string }).category || ''} />
+                      <div className="bg-white border border-t-0 border-gray-200 rounded-b-xl px-5 pb-3 flex items-center justify-between">
+                        <span className="text-xs text-gray-400">Resume match</span>
+                        <MatchBattery score={computeCanstartMatch(seekerProfile, opp)} variant="full" />
                       </div>
                     )}
                   </div>
@@ -1076,12 +806,6 @@ function OpportunitiesInner() {
         {/* External Jobs Tab */}
         {activeTab === 'external' && (
           <>
-            {seekerProfile && (
-              <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 mb-5 text-sm text-blue-700 flex items-center gap-2">
-                <Star size={15} className="flex-shrink-0" />
-                Match percentages are based on your skills, experience, and industry alignment — not location.
-              </div>
-            )}
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-sm text-gray-600 flex items-start gap-2">
               <ExternalLink size={16} className="flex-shrink-0 mt-0.5" />
               <span>Live jobs from the Canadian market, updated daily. Clicking a listing opens the employer&apos;s original posting.</span>
@@ -1134,7 +858,7 @@ function OpportunitiesInner() {
                         <button
                           onClick={() => {
                             if (!isLoggedIn) { router.push('/auth/signin?redirect=/opportunities'); return }
-                            setSelectedJob(job); fetchLLMKeywords(job); track('external_job_view', { category: job.category, city: job.city })
+                            setSelectedJob(job); track('external_job_view', { category: job.category, city: job.city })
                           }}
                           className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors"
                         >
@@ -1158,25 +882,12 @@ function OpportunitiesInner() {
                         ) : null}
                       </div>
 
-                      {seekerProfile && (() => {
-                        // Trigger LLM keyword fetch on first render of this job card
-                        if (!llmKeywordsCache.current.has(job.id) && !llmFetchingRef.current.has(job.id)) {
-                          fetchLLMKeywords(job)
-                        }
-                        return (
-                          <ATSPanel
-                            resumeText={seekerProfile.resume_text || ''}
-                            seekerProfile={seekerProfile}
-                            jobTitle={job.title}
-                            jobDescription={job.description || ''}
-                            workMode={job.work_mode}
-                            jobCity={job.city}
-                            jobCategory={job.category}
-                            llmKeywords={getLLMKeywords(job.id)}
-                            llmLoading={isLLMFetching(job.id)}
-                          />
-                        )
-                      })()}
+                      {seekerProfile && (
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+                          <span className="text-xs text-gray-400">Resume match</span>
+                          <MatchBattery score={computeExternalMatch(seekerProfile, job)} variant="full" />
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -1225,18 +936,9 @@ function OpportunitiesInner() {
           {/* Body — full description */}
           <div className="flex-1 overflow-y-auto p-6">
             {seekerProfile && (
-              <div className="mb-5">
-                <ATSPanel
-                  resumeText={seekerProfile.resume_text || ''}
-                  seekerProfile={seekerProfile}
-                  jobTitle={selectedJob.title}
-                  jobDescription={selectedJob.description || ''}
-                  workMode={selectedJob.work_mode}
-                  jobCity={selectedJob.city}
-                  jobCategory={selectedJob.category}
-                  llmKeywords={getLLMKeywords(selectedJob.id)}
-                  llmLoading={isLLMFetching(selectedJob.id)}
-                />
+              <div className="flex items-center justify-between bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 mb-5">
+                <span className="text-sm font-medium text-gray-700">Your resume match</span>
+                <MatchBattery score={computeExternalMatch(seekerProfile, selectedJob)} variant="full" />
               </div>
             )}
             <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Job Description</h3>

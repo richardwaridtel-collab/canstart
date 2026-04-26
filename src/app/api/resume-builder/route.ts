@@ -77,6 +77,28 @@ I work best in environments where the stakes are real, the org chart is complica
 and someone needs to hold the whole thing together."
 Tailor the summary to the specific job description provided. Use the candidate's actual background.
 
+=== KEYWORD INTEGRATION — TARGET 90%+ MATCH (CRITICAL) ===
+
+Your primary goal is to produce a resume that scores 90%+ when evaluated against this job description.
+To do this, you MUST integrate the job's required keywords, tools, and phrases naturally into the resume.
+
+HOW to do this honestly:
+1. Scan the job description for every required skill, tool, technology, methodology, and keyword.
+2. For each one — ask: "Has this candidate done this in any of their roles, even if they called it something different?"
+   - If YES: rewrite the relevant bullet using the JD's EXACT terminology. The work is real; use the right label.
+     Example: JD says "stakeholder management" → candidate managed clients → bullet says "stakeholder management"
+     Example: JD says "cross-functional collaboration" → candidate worked across teams → use that phrase
+     Example: JD says "CRM management" → candidate used Salesforce → use "CRM management (Salesforce)"
+   - If PARTIALLY: frame the experience to highlight the overlap. Don't fabricate, but don't undersell either.
+   - If NO: do not invent it. Skip it.
+3. The summary MUST mirror the job's language. Use the JD's key phrases to describe the candidate's background.
+4. In competencies, include JD keywords where the candidate has genuine evidence — even if their original resume
+   used different wording. The evidence is what matters; the label should match the JD.
+5. In the tools section, include every tool from the JD that appears in the candidate's background.
+
+RESULT: A resume that uses the employer's language to describe the candidate's real experience = high ATS score.
+This is not fabrication — it is proper translation of experience into the vocabulary of this specific role.
+
 === OUTPUT FORMAT ===
 Return ONLY valid JSON, no markdown, no explanation. Use this exact structure:
 
@@ -192,13 +214,15 @@ Industry/domain relevance (worth 15%):
   5  = different industry but some overlap
   0  = completely different background
 
-MATCH BENCHMARKS:
-  85–100% = near-perfect fit, candidate is very well suited
-  70–84%  = strong match, most requirements covered
-  55–69%  = decent match, some gaps exist
-  40–54%  = partial match, significant gaps
-  Below 40% = weak match, major requirements missing
-  Most matches should honestly fall between 45% and 70%. Only give 80%+ if the fit is genuinely strong.
+MATCH BENCHMARKS (for a TAILORED resume that has integrated JD keywords):
+  90–100% = near-perfect: candidate meets nearly all requirements and keywords are fully integrated
+  80–89%  = strong: most requirements covered, one or two minor gaps
+  70–79%  = good: solid match with some skill or experience gaps
+  55–69%  = partial: relevant background but notable gaps in required skills
+  Below 55% = weak: major requirements are missing
+  NOTE: Because this resume has been specifically tailored to the JD with keyword integration,
+  scores should typically be 75–90% for relevant candidates. Only score below 70% if there are
+  genuine, unavoidable gaps (wrong industry, years of experience significantly off, key skills absent).
 
 - ratingReasons: 2–3 short specific sentences explaining what drives this candidate's rating — refer to their actual background, real achievements, and how well their experience fits this role. Do not praise the writing or formatting (you wrote it). Focus on what the candidate actually brings (e.g. "Has 8 years of directly relevant project management experience with measurable outcomes across multiple roles" or "Original resume lacked specific metrics, which limits the evidence of real impact").
 
