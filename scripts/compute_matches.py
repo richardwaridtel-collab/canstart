@@ -392,6 +392,16 @@ def store_resume_hash(user_id: str, h: str) -> None:
     )
 
 
+def delete_seeker_matches(user_id: str) -> None:
+    """Delete all existing job_matches for a seeker before re-scoring.
+    This ensures stale keyword-scored matches don't coexist with fresh LLM matches."""
+    requests.delete(
+        f"{BASE}/job_matches?seeker_id=eq.{user_id}",
+        headers=HEADERS,
+        timeout=15,
+    )
+
+
 # ── Supabase REST helpers ─────────────────────────────────────────────────────
 
 def fetch_all(path: str, params: dict | None = None) -> list:
@@ -551,7 +561,8 @@ def main() -> None:
             scored_jobs.sort(key=lambda x: x[0], reverse=True)
             top_jobs = [job for _, job in scored_jobs[:LLM_PRE_FILTER_TOP_N]]
 
-            print(f"  Seeker {uid[:8]}: resume changed → LLM scoring top {len(top_jobs)} jobs…")
+            print(f"  Seeker {uid[:8]}: resume changed → clearing old matches, LLM scoring top {len(top_jobs)} jobs…")
+            delete_seeker_matches(uid)
 
             # ── Stage 2: LLM recruiter scoring ────────────────────────────
             seeker_matches: list[dict] = []
