@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle } from 'lucide-react'
 import { MatchBattery } from '@/components/MatchBattery'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
@@ -78,6 +78,38 @@ function detectJobType(title: string): string | null {
   if (t.includes('co-op') || t.includes('coop'))           return 'Co-op'
   if (t.includes('temporary') || t.includes(' temp '))     return 'Temporary'
   if (t.includes('summer student') || t.includes('summer position')) return 'Summer'
+  return null
+}
+
+function formatPostedDate(dateStr?: string): string | null {
+  if (!dateStr) return null
+  const diffMs = Date.now() - new Date(dateStr).getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  if (diffDays <= 6) return `${diffDays}d ago`
+  if (diffDays <= 13) return '1 week ago'
+  if (diffDays <= 20) return '2 weeks ago'
+  if (diffDays <= 27) return '3 weeks ago'
+  return new Date(dateStr).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+}
+
+function extractDeadline(description?: string): string | null {
+  if (!description) return null
+  const text = description.slice(0, 2500)
+  const patterns = [
+    /application\s+deadline[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /(?:submit|send)\s+(?:your\s+)?application[s]?\s+by[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /closing\s+date[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /apply\s+by[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /applications?\s+(?:close|closing)[s\s]+(?:on\s+)?([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /position\s+closes?[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+    /deadline[:\s]+([A-Za-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i,
+  ]
+  for (const re of patterns) {
+    const m = text.match(re)
+    if (m?.[1]) return m[1].trim()
+  }
   return null
 }
 
@@ -321,6 +353,8 @@ export default function DashboardPage() {
                     if (!job) return null
                     const salary = extractSalary(job.salary_min, job.salary_max, job.description)
                     const jobType = detectJobType(job.title)
+                    const postedDate = formatPostedDate(job.posted_at || job.synced_at)
+                    const deadline = extractDeadline(job.description)
                     return (
                       <Link
                         key={pick.job_id}
@@ -337,6 +371,18 @@ export default function DashboardPage() {
                             <span className="capitalize">{job.work_mode}</span>
                             {jobType && <><span className="text-gray-300">·</span><span>{jobType}</span></>}
                             {salary && <><span className="text-gray-300">·</span><span className="text-green-600 font-medium">{salary}</span></>}
+                          </p>
+                          <p className="text-xs mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            {postedDate && (
+                              <span className="flex items-center gap-0.5 text-gray-400">
+                                <Calendar size={10} />{postedDate}
+                              </span>
+                            )}
+                            {deadline && (
+                              <span className="flex items-center gap-0.5 text-orange-500 font-medium">
+                                <AlertCircle size={10} />Deadline: {deadline}
+                              </span>
+                            )}
                           </p>
                         </div>
                         <ArrowRight size={13} className="text-gray-400 group-hover:text-purple-600 transition-colors flex-shrink-0 ml-3" />
