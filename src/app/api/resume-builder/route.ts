@@ -91,13 +91,14 @@ ratingReasons: 2–3 short sentences about the candidate's actual background and
 matchGaps: 2–4 specific things the JD requires that the candidate lacks. Be concrete. Empty array [] if match >90%.
 trainingRecommendations: One specific named course/cert per gap (e.g. "Google Project Management Certificate on Coursera"). Empty array [] if no gaps.`
 
-type LLMProvider = 'groq' | 'gemini' | 'cerebras'
+type LLMProvider = 'groq' | 'gemini' | 'cerebras' | 'openrouter'
 
 interface ProviderConfig {
   name: LLMProvider
   url: string
   model: string
   key: string
+  extraHeaders?: Record<string, string>
 }
 
 function getAvailableProviders(): ProviderConfig[] {
@@ -106,10 +107,21 @@ function getAvailableProviders(): ProviderConfig[] {
     providers.push({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', key: process.env.GROQ_API_KEY })
   }
   if (process.env.GEMINI_API_KEY) {
+    // Gemini free tier: 1,000,000 TPM — primary heavy-load relief
     providers.push({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.0-flash', key: process.env.GEMINI_API_KEY })
   }
   if (process.env.CEREBRAS_API_KEY) {
     providers.push({ name: 'cerebras', url: 'https://api.cerebras.ai/v1/chat/completions', model: 'llama-3.3-70b', key: process.env.CEREBRAS_API_KEY })
+  }
+  if (process.env.OPENROUTER_API_KEY) {
+    // OpenRouter free tier: routes to free models across multiple providers
+    providers.push({
+      name: 'openrouter',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'meta-llama/llama-3.3-70b-instruct:free',
+      key: process.env.OPENROUTER_API_KEY,
+      extraHeaders: { 'HTTP-Referer': 'https://canstart.ca', 'X-Title': 'CanStart Resume Builder' }
+    })
   }
   return providers
 }
@@ -120,6 +132,7 @@ async function callLLM(messages: object[], maxTokens: number, provider: Provider
     headers: {
       'Authorization': `Bearer ${provider.key}`,
       'Content-Type': 'application/json',
+      ...provider.extraHeaders,
     },
     body: JSON.stringify({
       model: provider.model,
