@@ -24,6 +24,19 @@ type PickedJob = {
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
 
 
+function detectJobType(title: string): string | null {
+  const t = title.toLowerCase()
+  if (t.includes('part-time') || t.includes('part time'))  return 'Part-time'
+  if (t.includes('full-time') || t.includes('full time'))  return 'Full-time'
+  if (t.includes('contract') || t.includes('contractor'))  return 'Contract'
+  if (t.includes('freelance'))                             return 'Freelance'
+  if (t.includes('internship') || t.includes('intern'))    return 'Internship'
+  if (t.includes('co-op') || t.includes('coop'))           return 'Co-op'
+  if (t.includes('temporary') || t.includes(' temp '))     return 'Temporary'
+  if (t.includes('summer student') || t.includes('summer position')) return 'Summer'
+  return null
+}
+
 const statusIcon = (status: string) => {
   if (status === 'accepted') return <CheckCircle size={16} className="text-green-500" />
   if (status === 'rejected') return <XCircle size={16} className="text-red-400" />
@@ -267,6 +280,7 @@ export default function DashboardPage() {
                       : job.salary_min
                         ? `$${Math.round(job.salary_min / 1000)}K+/yr`
                         : null
+                    const jobType = detectJobType(job.title)
                     return (
                       <Link
                         key={pick.job_id}
@@ -281,6 +295,7 @@ export default function DashboardPage() {
                             <span className="flex items-center gap-0.5"><MapPin size={10} />{job.city}</span>
                             <span className="text-gray-300">·</span>
                             <span className="capitalize">{job.work_mode}</span>
+                            {jobType && <><span className="text-gray-300">·</span><span>{jobType}</span></>}
                             {salary && <><span className="text-gray-300">·</span><span className="text-green-600 font-medium">{salary}</span></>}
                           </p>
                         </div>
