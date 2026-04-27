@@ -360,7 +360,7 @@ function SignUpForm() {
 
         <p className="text-center text-xs text-gray-400 mt-6">
           By signing up, you agree to our Terms of Service and Privacy Policy.
-          CanStart is free for newcomers, always.
+          CanStart is free for job seekers, always.
         </p>
       </div>
     </div>

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle, MessageSquarePlus, Star } from 'lucide-react'
 import { MatchBattery } from '@/components/MatchBattery'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
@@ -22,6 +22,7 @@ type PickedJob = {
   } | null
 }
 type CandidateMatch = { match_score: number; seeker_id: string; opportunity_id: string; opportunity_title: string; seeker_name: string; seeker_city: string }
+type TestimonialStatus = 'none' | 'pending' | 'approved'
 
 
 function extractSalary(salaryMin?: number, salaryMax?: number, description?: string): string | null {
@@ -154,6 +155,12 @@ export default function DashboardPage() {
   const [pickedJobs, setPickedJobs] = useState<PickedJob[]>([])
   const [preferredRoles, setPreferredRoles] = useState<string[]>([])
   const [candidateMatches, setCandidateMatches] = useState<CandidateMatch[]>([])
+  const [testimonialStatus, setTestimonialStatus] = useState<TestimonialStatus>('none')
+  const [testimonialForm, setTestimonialForm] = useState({ quote: '', name: '', role_title: '', city: '', country_of_origin: '' })
+  const [testimonialLoading, setTestimonialLoading] = useState(false)
+  const [testimonialError, setTestimonialError] = useState('')
+  const [testimonialSuccess, setTestimonialSuccess] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   useEffect(() => {
     loadDashboard()
@@ -171,6 +178,7 @@ export default function DashboardPage() {
 
     if (!profileData) { router.push('/profile/setup'); return }
     setProfile(profileData)
+    setCurrentUserId(user.id)
 
     if (profileData.role === 'seeker') {
       const { data: apps } = await supabase
@@ -198,11 +206,30 @@ export default function DashboardPage() {
       setExternalApplications((extApps || []) as ExternalApplication[])
 
       // Load preferred roles + "Picked for You" matches
+      // Pre-fill testimonial form with profile data
+      setTestimonialForm(prev => ({
+        ...prev,
+        name: profileData.full_name || '',
+        city: profileData.city || '',
+      }))
+
+      // Check testimonial status
+      try {
+        const { data: existingTestimonial } = await supabase
+          .from('testimonials')
+          .select('id, approved')
+          .eq('user_id', user.id)
+          .single()
+        if (existingTestimonial) {
+          setTestimonialStatus(existingTestimonial.approved ? 'approved' : 'pending')
+        }
+      } catch { /* no testimonial yet */ }
+
       try {
         const [{ data: sp }, { data: picks }] = await Promise.all([
           supabase
             .from('seeker_profiles')
-            .select('preferred_roles')
+            .select('preferred_roles, country_of_origin, role_title')
             .eq('user_id', user.id)
             .single(),
           supabase
@@ -216,6 +243,14 @@ export default function DashboardPage() {
 
         const roles: string[] = (sp?.preferred_roles || []).map((r: string) => r.toLowerCase())
         setPreferredRoles(roles)
+        // Update testimonial form with seeker profile data
+        if (sp) {
+          setTestimonialForm(prev => ({
+            ...prev,
+            country_of_origin: (sp as Record<string, unknown>).country_of_origin as string || prev.country_of_origin,
+            role_title: (sp as Record<string, unknown>).role_title as string || prev.role_title,
+          }))
+        }
 
         if (picks) {
           const filtered = roles.length > 0
@@ -282,6 +317,30 @@ export default function DashboardPage() {
     await supabase.from('external_applications').delete().eq('id', id)
     setExternalApplications((prev) => prev.filter((a) => a.id !== id))
     setDeletingId(null)
+  }
+
+  const submitTestimonial = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!currentUserId) return
+    setTestimonialLoading(true)
+    setTestimonialError('')
+    try {
+      const res = await fetch('/api/testimonials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: currentUserId, ...testimonialForm }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setTestimonialError(data.error || 'Something went wrong.')
+      } else {
+        setTestimonialSuccess(true)
+        setTestimonialStatus('pending')
+      }
+    } catch {
+      setTestimonialError('Could not submit. Please try again.')
+    }
+    setTestimonialLoading(false)
   }
 
   if (loading) {
@@ -489,6 +548,101 @@ export default function DashboardPage() {
                 </div>
               </div>
             )}
+            {/* ── Share Your Story ─────────────────────────────────────── */}
+            <div className="bg-white rounded-2xl border border-amber-200 p-6 mt-6">
+              <div className="flex items-center gap-2 mb-1">
+                <MessageSquarePlus size={18} className="text-amber-500" />
+                <h2 className="font-bold text-gray-900 text-lg">Share Your Story</h2>
+              </div>
+              <p className="text-xs text-gray-500 mb-4">Help other job seekers by sharing your CanStart experience. Approved stories appear on our homepage.</p>
+
+              {testimonialStatus === 'approved' ? (
+                <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-xl p-4">
+                  <Star size={20} className="text-yellow-400 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold text-green-800 text-sm">Your story is live!</p>
+                    <p className="text-xs text-green-600 mt-0.5">Thank you — your experience is inspiring others on the CanStart homepage.</p>
+                  </div>
+                </div>
+              ) : testimonialStatus === 'pending' || testimonialSuccess ? (
+                <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                  <CheckCircle size={20} className="text-amber-500 flex-shrink-0" />
+                  <div>
+                    <p className="font-semibold text-amber-800 text-sm">Story submitted — thank you!</p>
+                    <p className="text-xs text-amber-600 mt-0.5">We&apos;ll review it shortly and publish it on the homepage once approved.</p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={submitTestimonial} className="space-y-3">
+                  {testimonialError && (
+                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{testimonialError}</div>
+                  )}
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Your Story <span className="text-red-500">*</span></label>
+                    <textarea
+                      required
+                      value={testimonialForm.quote}
+                      onChange={(e) => setTestimonialForm({ ...testimonialForm, quote: e.target.value })}
+                      rows={3}
+                      placeholder="How did CanStart help you? What experience did you gain? (min. 30 characters)"
+                      className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Display Name <span className="text-red-500">*</span></label>
+                      <input
+                        required
+                        type="text"
+                        value={testimonialForm.name}
+                        onChange={(e) => setTestimonialForm({ ...testimonialForm, name: e.target.value })}
+                        placeholder="e.g., Fariha J."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Your Role / Title</label>
+                      <input
+                        type="text"
+                        value={testimonialForm.role_title}
+                        onChange={(e) => setTestimonialForm({ ...testimonialForm, role_title: e.target.value })}
+                        placeholder="e.g., Marketing Specialist"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">City</label>
+                      <input
+                        type="text"
+                        value={testimonialForm.city}
+                        onChange={(e) => setTestimonialForm({ ...testimonialForm, city: e.target.value })}
+                        placeholder="e.g., Ottawa"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Country of Origin</label>
+                      <input
+                        type="text"
+                        value={testimonialForm.country_of_origin}
+                        onChange={(e) => setTestimonialForm({ ...testimonialForm, country_of_origin: e.target.value })}
+                        placeholder="e.g., India"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={testimonialLoading}
+                    className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-amber-300 text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm transition-colors"
+                  >
+                    {testimonialLoading
+                      ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <><MessageSquarePlus size={15} /> Submit My Story</>}
+                  </button>
+                </form>
+              )}
+            </div>
           </>
         ) : (
           <>

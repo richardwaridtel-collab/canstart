@@ -13,7 +13,7 @@ export default function Footer() {
               </div>
             </div>
             <p className="text-gray-400 text-sm leading-relaxed max-w-sm">
-              Empowering newcomers to gain Canadian work experience through volunteer and micro-internship opportunities with local businesses.
+              Empowering job seekers to gain Canadian work experience through volunteer and micro-internship opportunities with local businesses.
             </p>
             <div className="flex items-center gap-2 mt-4 text-sm text-gray-500">
               <MapPin size={14} />
@@ -22,7 +22,7 @@ export default function Footer() {
           </div>
 
           <div>
-            <h3 className="text-white font-semibold mb-4">For Newcomers</h3>
+            <h3 className="text-white font-semibold mb-4">For Job Seekers</h3>
             <ul className="space-y-2 text-sm">
               <li><Link href="/opportunities" className="hover:text-white transition-colors">Browse Opportunities</Link></li>
               <li><Link href="/auth/signup?role=seeker" className="hover:text-white transition-colors">Create Profile</Link></li>
@@ -45,7 +45,7 @@ export default function Footer() {
         <div className="border-t border-gray-800 mt-10 pt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-sm text-gray-500">
             © {new Date().getFullYear()} CanStart. Built with{' '}
-            <Heart size={12} className="inline text-red-500" /> for Canada&apos;s newcomers.
+            <Heart size={12} className="inline text-red-500" /> for Canada&apos;s job seekers.
           </p>
           <div className="flex items-center gap-2 text-sm text-gray-500">
             <Mail size={14} />

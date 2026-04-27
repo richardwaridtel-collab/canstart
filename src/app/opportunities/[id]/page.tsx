@@ -140,7 +140,7 @@ export default function OpportunityDetailPage() {
                 <div>
                   <h3 className="font-semibold text-blue-900 text-sm mb-1">Verified Employer</h3>
                   <p className="text-blue-700 text-xs leading-relaxed">
-                    This employer has been verified by CanStart. All opportunities are reviewed to ensure they are legitimate and safe for newcomers.
+                    This employer has been verified by CanStart. All opportunities are reviewed to ensure they are legitimate and safe for job seekers.
                   </p>
                 </div>
               </div>

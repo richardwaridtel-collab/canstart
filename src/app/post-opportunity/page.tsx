@@ -86,7 +86,7 @@ export default function PostOpportunityPage() {
 
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Post an Opportunity</h1>
-          <p className="text-gray-500">Connect with skilled newcomers ready to contribute to your business</p>
+          <p className="text-gray-500">Connect with skilled job seekers ready to contribute to your business</p>
         </div>
 
         {posted && (

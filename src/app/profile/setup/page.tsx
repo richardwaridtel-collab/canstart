@@ -527,7 +527,7 @@ export default function ProfileSetupPage() {
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
                   rows={4}
-                  placeholder="Tell newcomers about your company, your culture, and why they should join you..."
+                  placeholder="Tell job seekers about your company, your culture, and why they should join you..."
                   className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
                 />
               </div>

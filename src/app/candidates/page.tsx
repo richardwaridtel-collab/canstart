@@ -154,7 +154,7 @@ export default function CandidatesPage() {
       <div className="bg-gradient-to-br from-gray-800 to-gray-900 text-white py-14">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h1 className="text-3xl sm:text-4xl font-bold mb-3">Find Skilled Candidates</h1>
-          <p className="text-gray-300 text-lg mb-8">Browse profiles of motivated newcomers ready to contribute to your business</p>
+          <p className="text-gray-300 text-lg mb-8">Browse profiles of motivated job seekers ready to contribute to your business</p>
           <div className="relative max-w-2xl">
             <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by skill, education, or name..." className="w-full pl-12 pr-4 py-4 rounded-xl text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-red-400 shadow-lg" />
