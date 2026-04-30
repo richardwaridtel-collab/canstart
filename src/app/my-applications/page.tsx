@@ -8,20 +8,44 @@ import {
   ChevronRight, MapPin, Building2, CalendarDays, XCircle,
 } from 'lucide-react'
 
-// ── Stage definitions (must match employer pipeline) ─────────────────────────
+// ── Stage definitions ─────────────────────────────────────────────────────────
 
-const STAGES = [
-  { key: 'applied',     label: 'Applied',          color: 'blue' },
-  { key: 'reviewing',   label: 'Under Review',      color: 'yellow' },
-  { key: 'shortlisted', label: 'Shortlisted',       color: 'purple' },
-  { key: 'assessment',  label: 'Assessment',        color: 'orange' },
-  { key: 'interview',   label: 'Interview',         color: 'indigo' },
-  { key: 'offer',       label: 'Offer Extended',    color: 'green' },
-  { key: 'hired',       label: 'Hired',             color: 'emerald' },
-  { key: 'rejected',    label: 'Not Selected',      color: 'red' },
+// All internal pipeline stages (kept for type safety & history mapping)
+const ALL_STAGE_KEYS = ['applied','reviewing','shortlisted','assessment','interview','offer','hired','rejected'] as const
+type StageName = typeof ALL_STAGE_KEYS[number]
+
+// Candidate-visible stepper stages — internal employer stages are intentionally hidden
+const CANDIDATE_STAGES = [
+  { key: 'applied',   label: 'Applied',        color: 'blue'    },
+  { key: 'interview', label: 'Interview',      color: 'indigo'  },
+  { key: 'offer',     label: 'Offer Extended', color: 'green'   },
+  { key: 'hired',     label: 'Hired',          color: 'emerald' },
 ] as const
 
-type StageName = typeof STAGES[number]['key']
+// Map any internal stage → candidate-facing label & color for the status badge
+function getCandidateBadge(pipelineStage: string): { label: string; color: string } {
+  switch (pipelineStage) {
+    case 'applied':
+    case 'reviewing':
+    case 'shortlisted':
+    case 'assessment':
+      return { label: 'Application Received', color: 'blue' }
+    case 'interview': return { label: 'Interview',       color: 'indigo'  }
+    case 'offer':     return { label: 'Offer Extended',  color: 'green'   }
+    case 'hired':     return { label: 'Hired!',          color: 'emerald' }
+    case 'rejected':  return { label: 'Not Selected',    color: 'red'     }
+    default:          return { label: 'Application Received', color: 'blue' }
+  }
+}
+
+// Map pipeline stage to which CANDIDATE_STAGES step index is "current"
+function getCandidateStepIdx(pipelineStage: string): number {
+  if (['applied','reviewing','shortlisted','assessment'].includes(pipelineStage)) return 0
+  if (pipelineStage === 'interview') return 1
+  if (pipelineStage === 'offer')     return 2
+  if (pipelineStage === 'hired')     return 3
+  return 0
+}
 
 type Application = {
   id: string
@@ -58,45 +82,32 @@ const STAGE_COLORS: Record<string, { bg: string; text: string; ring: string; dot
   red:     { bg: 'bg-red-50',     text: 'text-red-700',     ring: 'ring-red-400',     dot: 'bg-red-400' },
 }
 
-function getStageInfo(key: string) {
-  const s = STAGES.find(s => s.key === key)
-  if (!s) return STAGE_COLORS['blue']
-  return STAGE_COLORS[s.color]
-}
-
-function getStageMeta(key: string) {
-  return STAGES.find(s => s.key === key) ?? { key, label: key, color: 'blue' }
-}
-
 // ── Stepper component ─────────────────────────────────────────────────────────
 
 function ApplicationStepper({ app }: { app: Application }) {
   const isRejected = app.pipeline_stage === 'rejected'
-  const currentIdx = STAGES.findIndex(s => s.key === app.pipeline_stage)
+  const candidateStepIdx = getCandidateStepIdx(app.pipeline_stage)
+  const badge = getCandidateBadge(app.pipeline_stage)
+  const badgeColors = STAGE_COLORS[badge.color]
 
-  // Active stages = all except rejected (show rejection separately)
-  const activeStages = STAGES.filter(s => s.key !== 'rejected')
-
-  // Which steps are "reached" according to history
-  const reachedKeys = new Set(app.stage_history.map(h => h.stage))
+  // Interview date from history (used below stepper)
   const historyMap = new Map(app.stage_history.map(h => [h.stage, h.at]))
-
-  const stageInfo = getStageInfo(app.pipeline_stage)
-  const stageMeta = getStageMeta(app.pipeline_stage)
+  const interviewDate = historyMap.get('interview')
 
   return (
     <div>
       {/* Current status badge */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${stageInfo.bg} ${stageInfo.text}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot}`} />
-          {stageMeta.label}
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${badgeColors.bg} ${badgeColors.text}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${badgeColors.dot}`} />
+          {badge.label}
           {app.stage_updated_at && (
             <span className="opacity-60 font-normal ml-1">
               · {new Date(app.stage_updated_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
             </span>
           )}
         </div>
+        {/* Interview sub-stage badge — only visible when in interview stage */}
         {app.pipeline_stage === 'interview' && app.interview_stage && INTERVIEW_SUB_STAGES[app.interview_stage] && (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-600 text-white">
             <ChevronRight size={10} />
@@ -105,63 +116,61 @@ function ApplicationStepper({ app }: { app: Application }) {
         )}
       </div>
 
-      {/* If rejected, show special notice */}
-      {isRejected ? (
+      {/* Rejection notice */}
+      {isRejected && (
         <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 mb-3">
           <XCircle size={16} />
           <span>This application was not selected. Keep applying — the right opportunity is out there!</span>
         </div>
-      ) : null}
+      )}
 
-      {/* Stage stepper (horizontal on desktop, minimal on mobile) */}
+      {/* Candidate-facing stepper — hides internal employer stages */}
       {!isRejected && (
         <div className="overflow-x-auto">
           <div className="flex items-center min-w-max gap-0">
-            {activeStages.map((stage, idx) => {
-              const reached = reachedKeys.has(stage.key)
-              const isCurrent = stage.key === app.pipeline_stage
-              const dateStr = historyMap.get(stage.key)
+            {CANDIDATE_STAGES.map((stage, idx) => {
+              const isCurrent = idx === candidateStepIdx
+              const isPast    = idx < candidateStepIdx
               const c = STAGE_COLORS[stage.color]
+              // Show interview date under the Interview node
+              const nodeDate = stage.key === 'interview' ? interviewDate : undefined
 
               return (
                 <div key={stage.key} className="flex items-center">
-                  {/* Step node */}
                   <div className="flex flex-col items-center gap-1" style={{ minWidth: 72 }}>
                     <div
                       className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ring-2 transition-all ${
                         isCurrent
                           ? `${c.bg} ${c.text} ${c.ring}`
-                          : reached
+                          : isPast
                           ? 'bg-green-100 text-green-700 ring-green-400'
                           : 'bg-gray-100 text-gray-400 ring-gray-200'
                       }`}
                     >
                       {isCurrent ? (
                         <span className={`w-2.5 h-2.5 rounded-full ${c.dot}`} />
-                      ) : reached ? (
+                      ) : isPast ? (
                         <CheckCircle2 size={13} />
                       ) : (
                         <Circle size={13} />
                       )}
                     </div>
                     <span className={`text-[10px] font-medium text-center leading-tight ${
-                      isCurrent ? c.text : reached ? 'text-green-700' : 'text-gray-400'
+                      isCurrent ? c.text : isPast ? 'text-green-700' : 'text-gray-400'
                     }`} style={{ maxWidth: 64 }}>
                       {stage.label}
                     </span>
-                    {dateStr && (
+                    {nodeDate && (
                       <span className="text-[9px] text-gray-400">
-                        {new Date(dateStr).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+                        {new Date(nodeDate).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
                       </span>
                     )}
                   </div>
 
-                  {/* Connector line */}
-                  {idx < activeStages.length - 1 && (
+                  {/* Connector */}
+                  {idx < CANDIDATE_STAGES.length - 1 && (
                     <div className={`h-0.5 w-6 mb-5 transition-colors ${
-                      reachedKeys.has(activeStages[idx + 1].key) || isCurrent
-                        ? 'bg-green-300'
-                        : 'bg-gray-200'
+                      idx < candidateStepIdx ? 'bg-green-300' : 'bg-gray-200'
                     }`} />
                   )}
                 </div>
@@ -171,43 +180,47 @@ function ApplicationStepper({ app }: { app: Application }) {
         </div>
       )}
 
-      {/* Next-step indicator */}
-      {!isRejected && (() => {
-        const nextIdx = currentIdx + 1
-        const next = nextIdx < activeStages.length ? activeStages[nextIdx] : null
-        if (!next) return null
-        const nc = STAGE_COLORS[next.color]
-        return (
-          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-            Next step:
-            <span className={`font-semibold ${nc.text}`}>{next.label}</span>
-          </p>
-        )
-      })()}
+      {/* Next-step hint — only show if in interview stage or beyond (not for pre-interview waiting) */}
+      {!isRejected && candidateStepIdx < CANDIDATE_STAGES.length - 1 && candidateStepIdx > 0 && (
+        (() => {
+          const next = CANDIDATE_STAGES[candidateStepIdx + 1]
+          if (!next) return null
+          const nc = STAGE_COLORS[next.color]
+          return (
+            <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+              Next step: <span className={`font-semibold ${nc.text}`}>{next.label}</span>
+            </p>
+          )
+        })()
+      )}
 
-      {/* History timeline (compact) */}
-      {app.stage_history.length > 1 && (
-        <details className="mt-3">
-          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none flex items-center gap-1">
-            <Clock size={11} /> View timeline
-          </summary>
-          <div className="mt-2 pl-3 border-l-2 border-gray-100 space-y-1">
-            {[...app.stage_history]
-              .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
-              .map((h, i) => {
-                const sm = getStageMeta(h.stage)
-                const sc = getStageInfo(h.stage)
+      {/* History timeline — only shows interview-stage-onward entries */}
+      {(() => {
+        const visibleHistory = [...app.stage_history]
+          .filter(h => ['interview','offer','hired'].includes(h.stage))
+          .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+        if (visibleHistory.length === 0) return null
+        return (
+          <details className="mt-3">
+            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none flex items-center gap-1">
+              <Clock size={11} /> View timeline
+            </summary>
+            <div className="mt-2 pl-3 border-l-2 border-gray-100 space-y-1">
+              {visibleHistory.map((h, i) => {
+                const badge2 = getCandidateBadge(h.stage)
+                const sc = STAGE_COLORS[badge2.color]
                 return (
                   <div key={i} className="flex items-center gap-2 text-xs text-gray-500">
                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
-                    <span className={`font-medium ${sc.text}`}>{sm.label}</span>
+                    <span className={`font-medium ${sc.text}`}>{badge2.label}</span>
                     <span className="text-gray-400">{new Date(h.at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                   </div>
                 )
               })}
-          </div>
-        </details>
-      )}
+            </div>
+          </details>
+        )
+      })()}
     </div>
   )
 }
