@@ -664,8 +664,8 @@ function CandidateCard({
       <div className="flex items-center justify-between px-2 py-1.5 bg-gray-50 border-t border-gray-100">
         {canGoBack ? (
           <button onClick={() => onMove(app.id, prevStage!.key)} disabled={moving}
-            className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-40">
-            <ChevronLeft size={14} />
+            className="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-700 hover:bg-gray-100 px-2 py-0.5 rounded-lg transition-colors disabled:opacity-40">
+            <ChevronLeft size={12} /><span className="truncate max-w-[88px]">{prevStage!.label}</span>
           </button>
         ) : <div className="w-6" />}
 
@@ -681,10 +681,10 @@ function CandidateCard({
 
         {canGoForward ? (
           <button onClick={() => onMove(app.id, nextStage!.key)} disabled={moving}
-            className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-40">
+            className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-green-700 hover:bg-green-50 px-2 py-0.5 rounded-lg transition-colors disabled:opacity-40">
             {moving
-              ? <div className="w-3.5 h-3.5 border border-gray-400 border-t-transparent rounded-full animate-spin" />
-              : <ChevronRight size={14} />}
+              ? <div className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+              : <><span className="truncate max-w-[88px]">{nextStage!.label}</span><ChevronRight size={12} /></>}
           </button>
         ) : <div className="w-6" />}
       </div>

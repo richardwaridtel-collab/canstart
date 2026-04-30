@@ -156,6 +156,20 @@ function ApplicationStepper({ app }: { app: Application }) {
         </div>
       )}
 
+      {/* Next-step indicator */}
+      {!isRejected && (() => {
+        const nextIdx = currentIdx + 1
+        const next = nextIdx < activeStages.length ? activeStages[nextIdx] : null
+        if (!next) return null
+        const nc = STAGE_COLORS[next.color]
+        return (
+          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+            Next step:
+            <span className={`font-semibold ${nc.text}`}>{next.label}</span>
+          </p>
+        )
+      })()}
+
       {/* History timeline (compact) */}
       {app.stage_history.length > 1 && (
         <details className="mt-3">
