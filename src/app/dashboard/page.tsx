@@ -369,6 +369,9 @@ export default function DashboardPage() {
                 <Link href="/opportunities" className="bg-white text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors">
                   <Briefcase size={16} /> Browse Opportunities
                 </Link>
+                <Link href="/interviews" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Briefcase size={16} /> Interviews
+                </Link>
                 <Link href="/messages" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   <MessageSquarePlus size={16} /> Messages
                 </Link>
@@ -383,6 +386,9 @@ export default function DashboardPage() {
                 </Link>
                 <Link href="/candidates" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   <Users size={16} /> Browse Candidates
+                </Link>
+                <Link href="/interviews" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Briefcase size={16} /> Interviews
                 </Link>
                 <Link href="/talent-pool" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   <BookmarkCheck size={16} /> Talent Pool

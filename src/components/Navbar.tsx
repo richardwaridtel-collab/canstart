@@ -109,6 +109,9 @@ export default function Navbar() {
                 <Link href="/dashboard" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Dashboard
                 </Link>
+                <Link href="/interviews" className="text-gray-600 hover:text-red-600 font-medium transition-colors hidden lg:block">
+                  Interviews
+                </Link>
                 <Link href="/messages" className="relative text-gray-600 hover:text-red-600 font-medium transition-colors flex items-center gap-1">
                   <MessageSquare size={17} />
                   <span className="hidden lg:inline">Messages</span>
@@ -178,6 +181,9 @@ export default function Navbar() {
             <>
               <Link href="/dashboard" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Dashboard
+              </Link>
+              <Link href="/interviews" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                Interviews
               </Link>
               <Link href="/messages" className="flex items-center justify-between text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 <span className="flex items-center gap-2"><MessageSquare size={16} /> Messages</span>

@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, MapPin, Globe, Briefcase, Download, ExternalLink,
   Users, ChevronRight, ChevronLeft, Pencil, Check, X,
-  BookmarkPlus, BookmarkCheck, Tag, ChevronDown, ChevronUp, MessageSquare,
+  BookmarkPlus, BookmarkCheck, Tag, ChevronDown, ChevronUp, MessageSquare, CalendarPlus,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -355,6 +355,7 @@ export default function PipelinePage() {
                           onTogglePool={() => togglePool(app.seeker_id, !!app.inPool)}
                           onMessage={() => startConversation(app.seeker_id)}
                           messagingLoading={messagingId === app.seeker_id}
+                          scheduleUrl={`/interviews/new?seekerId=${app.seeker_id}&seekerName=${encodeURIComponent(app.full_name)}&appId=${app.id}&oppId=${jobId}&oppTitle=${encodeURIComponent(job?.title || '')}`}
                           predefinedTags={PREDEFINED_TAGS}
                           tagColors={TAG_COLORS}
                           immigrationLabels={IMMIGRATION_LABELS}
@@ -399,6 +400,7 @@ type CardProps = {
   onTogglePool: () => void
   onMessage: () => void
   messagingLoading: boolean
+  scheduleUrl: string
   predefinedTags: string[]
   tagColors: Record<string, string>
   immigrationLabels: Record<string, string>
@@ -411,7 +413,7 @@ function CandidateCard({
   noteDraft, downloadingResume, poolLoading, expanded, onToggleExpand,
   onMove, onEditNotes, onCancelNotes, onNoteDraftChange, onSaveNotes,
   onToggleTag, onDownloadResume, onTogglePool, onMessage, messagingLoading,
-  predefinedTags, tagColors, immigrationLabels, modeLabels, stages,
+  scheduleUrl, predefinedTags, tagColors, immigrationLabels, modeLabels, stages,
 }: CardProps) {
   const [showTagPicker, setShowTagPicker] = useState(false)
 
@@ -613,6 +615,12 @@ function CandidateCard({
                 <ExternalLink size={11} /> LinkedIn
               </a>
             )}
+            <Link
+              href={scheduleUrl}
+              className="flex items-center gap-1 text-xs bg-purple-50 hover:bg-purple-100 text-purple-700 px-2.5 py-1.5 rounded-full font-medium transition-colors"
+            >
+              <CalendarPlus size={11} /> Schedule
+            </Link>
           </div>
 
           <p className="text-xs text-gray-400">Applied {new Date(app.created_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</p>
