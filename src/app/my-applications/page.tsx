@@ -212,7 +212,25 @@ export default function MyApplicationsPage() {
         .eq('seeker_id', user.id)
         .order('created_at', { ascending: false })
 
-      setApplications((data || []) as Application[])
+      // Supabase returns the FK join as "opportunities" (plural); remap to "opportunity"
+      const mapped: Application[] = (data || []).map((row: Record<string, unknown>) => {
+        const opp = Array.isArray(row.opportunities) ? row.opportunities[0] : row.opportunities
+        return {
+          id: row.id as string,
+          pipeline_stage: (row.pipeline_stage ?? 'applied') as StageName,
+          stage_history: (row.stage_history ?? []) as { stage: string; at: string }[],
+          stage_updated_at: row.stage_updated_at as string,
+          created_at: row.created_at as string,
+          opportunity: opp ? {
+            id: (opp as Record<string, unknown>).id as string,
+            title: (opp as Record<string, unknown>).title as string,
+            type: (opp as Record<string, unknown>).type as string,
+            city: (opp as Record<string, unknown>).city as string | undefined,
+            employer_profiles: (opp as Record<string, unknown>).employer_profiles as { company_name?: string } | null,
+          } : null,
+        }
+      })
+      setApplications(mapped)
       setLoading(false)
     }
     load()
