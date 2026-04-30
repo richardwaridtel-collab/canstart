@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
-import { Menu, X, MapPin, PlusCircle, MessageSquare } from 'lucide-react'
+import { Menu, X, MapPin, PlusCircle, MessageSquare, BarChart2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 const ADMIN_EMAILS = ['richard.waridtel@gmail.com']
@@ -86,6 +86,9 @@ export default function Navbar() {
                 <Link href="/candidates" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Find Candidates
                 </Link>
+                <Link href="/analytics" className="flex items-center gap-1 text-gray-600 hover:text-red-600 font-medium transition-colors">
+                  <BarChart2 size={15} /> Analytics
+                </Link>
                 <Link href="/post-opportunity" className="flex items-center gap-1.5 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
                   <PlusCircle size={15} /> Post Opportunity
                 </Link>
@@ -161,6 +164,9 @@ export default function Navbar() {
             <>
               <Link href="/candidates" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Find Candidates
+              </Link>
+              <Link href="/analytics" className="flex items-center gap-2 text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                <BarChart2 size={16} /> Analytics
               </Link>
               <Link href="/post-opportunity" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Post Opportunity

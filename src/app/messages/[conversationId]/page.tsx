@@ -287,7 +287,7 @@ export default function ChatPage() {
                           <Clock size={9} /> {formatTime(msg.created_at)}
                         </span>
                         {isMine && msg.read_at && (
-                          <CheckCheck size={12} className="text-blue-400" title="Read" />
+                          <CheckCheck size={12} className="text-blue-400" aria-label="Read" />
                         )}
                       </div>
                     </div>

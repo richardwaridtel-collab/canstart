@@ -1,309 +1,824 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink, FileText, Download, ChevronDown, BookmarkPlus, BookmarkCheck } from 'lucide-react'
+import {
+  Search, X, Bookmark, BookmarkCheck, ChevronDown, ExternalLink,
+  FileText, Briefcase, MapPin, Globe, User, SlidersHorizontal,
+  MessageSquare, CalendarPlus, Check, Loader2,
+} from 'lucide-react'
 
-type Candidate = {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface Candidate {
   id: string
-  full_name: string
-  city: string
-  country_of_origin: string
-  immigration_status: string
+  fullName: string
+  city: string | null
+  countryOfOrigin: string | null
+  immigrationStatus: string | null   // DB value: 'pr' | 'owp' | 'student' | 'citizen'
   skills: string[]
-  education: string
-  work_preference: string
-  bio: string
-  linkedin_url?: string
-  resume_path?: string
-  additional_doc_path?: string
-  inPool?: boolean
+  education: string | null
+  bio: string | null
+  linkedinUrl: string | null
+  resumePath: string | null
+  additionalDocPath: string | null
+  workPreference: string | null      // DB value: 'remote' | 'hybrid' | 'onsite' | 'any'
+  inPool: boolean
+  matchedSkills: string[]
 }
 
-type PostedOpportunity = {
-  id: string
-  title: string
-  skills_required: string[]
-  work_mode: string
-  city: string
-}
+interface Opportunity { id: string; title: string }
 
-const statusLabels: Record<string, string> = { owp: 'Open Work Permit', pr: 'Permanent Resident', student: 'Student Visa', citizen: 'Citizen' }
-const modeLabels: Record<string, string> = { remote: 'Remote', hybrid: 'Hybrid', onsite: 'On-site', any: 'Any' }
+// ─── Work preference: DB value → display label ───────────────────────────────
+const WORK_MODE_OPTIONS = [
+  { value: 'any',    label: 'Any'     },
+  { value: 'remote', label: 'Remote'  },
+  { value: 'hybrid', label: 'Hybrid'  },
+  { value: 'onsite', label: 'On-site' },
+]
 
-function tieredSkillScore(matched: number): number {
-  if (matched >= 4) return 65
-  if (matched === 3) return 55
-  if (matched === 2) return 42
-  if (matched === 1) return 26
-  return 0
-}
+// ─── Immigration status: DB value → display label ────────────────────────────
+const IMM_STATUS_OPTIONS = [
+  { value: 'any',     label: 'Any Status'         },
+  { value: 'pr',      label: 'Permanent Resident' },
+  { value: 'citizen', label: 'Citizen'            },
+  { value: 'owp',     label: 'Open Work Permit'   },
+  { value: 'student', label: 'Study Permit'       },
+]
 
-function computeMatch(candidate: Candidate, opp: PostedOpportunity): number {
-  const required = opp.skills_required || []
-  let skillScore = 0
-  if (required.length > 0) {
-    const matched = required.filter((r) => candidate.skills.some((s) => s.toLowerCase().includes(r.toLowerCase()) || r.toLowerCase().includes(s.toLowerCase()))).length
-    skillScore = tieredSkillScore(matched)
-  } else {
-    skillScore = 45
-  }
-  const modeScore = (candidate.work_preference === 'any' || candidate.work_preference === opp.work_mode || opp.work_mode === 'hybrid') ? 20 : 5
-  const cityScore = candidate.city && opp.city && candidate.city.toLowerCase() === opp.city.toLowerCase() ? 15 : 0
-  return Math.round(Math.min(100, skillScore + modeScore + cityScore))
-}
+const SORT_OPTIONS = [
+  { key: 'match',  label: 'Best Match' },
+  { key: 'name',   label: 'Name (A–Z)' },
+  { key: 'newest', label: 'Newest'     },
+]
 
-function MatchBar({ pct }: { pct: number }) {
-  const color = pct >= 70 ? 'bg-green-500' : pct >= 40 ? 'bg-yellow-400' : 'bg-orange-400'
-  const label = pct >= 70 ? 'Strong Match' : pct >= 40 ? 'Good Match' : 'Partial Match'
-  const textColor = pct >= 70 ? 'text-green-600' : pct >= 40 ? 'text-yellow-600' : 'text-orange-500'
-  return (
-    <div className="mt-3 pt-3 border-t border-gray-100">
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-gray-400">Match Score</span>
-        <span className={`text-xs font-semibold ${textColor}`}>{pct}% · {label}</span>
-      </div>
-      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
-  )
-}
+const CHIP_COLOURS = [
+  'bg-blue-50 text-blue-700 border-blue-200',
+  'bg-purple-50 text-purple-700 border-purple-200',
+  'bg-green-50 text-green-700 border-green-200',
+  'bg-amber-50 text-amber-700 border-amber-200',
+  'bg-pink-50 text-pink-700 border-pink-200',
+]
+const chipColour = (i: number) => CHIP_COLOURS[i % CHIP_COLOURS.length]
+
+// ─── Main component ──────────────────────────────────────────────────────────
 
 export default function CandidatesPage() {
-  const router = useRouter()
-  const [candidates, setCandidates] = useState<Candidate[]>([])
-  const [filtered, setFiltered] = useState<Candidate[]>([])
-  const [search, setSearch] = useState('')
-  const [city, setCity] = useState('All Cities')
-  const [isEmployer, setIsEmployer] = useState(false)
-  const [authChecked, setAuthChecked] = useState(false)
-  const [postedJobs, setPostedJobs] = useState<PostedOpportunity[]>([])
-  const [selectedJobId, setSelectedJobId] = useState<string>('')
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [poolLoadingId, setPoolLoadingId] = useState<string | null>(null)
-  const [currentEmployerId, setCurrentEmployerId] = useState<string | null>(null)
+  const [empId, setEmpId]             = useState<string | null>(null)
+  const [opps, setOpps]               = useState<Opportunity[]>([])
+  const [allCandidates, setAll]       = useState<Candidate[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [loadError, setLoadError]     = useState('')
 
-  const cities = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
-  const selectedJob = postedJobs.find((j) => j.id === selectedJobId) || null
+  // ── filters
+  const [skillInput, setSkillInput]   = useState('')
+  const [selectedSkills, setSelected] = useState<string[]>([])
+  const [cityFilter, setCityFilter]   = useState('')
+  const [workMode, setWorkMode]       = useState('any')
+  const [immStatus, setImmStatus]     = useState('any')
+  const [hasResume, setHasResume]     = useState(false)
+  const [sortBy, setSortBy]           = useState('match')
+  const [showFilters, setShowFilters] = useState(false)
 
+  // ── skill autocomplete
+  const [allSkills, setAllSkills]     = useState<string[]>([])
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [showSugg, setShowSugg]       = useState(false)
+  const skillRef                      = useRef<HTMLDivElement>(null)
+
+  // ── pool loading state per candidate
+  const [poolLoading, setPoolLoading] = useState<Record<string, boolean>>({})
+
+  // ─── Bootstrap ───────────────────────────────────────────────────────────
   useEffect(() => {
-    checkEmployer()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { window.location.href = '/auth/signin'; return }
 
-  useEffect(() => {
-    let result = [...candidates]
-    if (search) result = result.filter((c) => c.full_name.toLowerCase().includes(search.toLowerCase()) || c.skills.some((s) => s.toLowerCase().includes(search.toLowerCase())) || c.education.toLowerCase().includes(search.toLowerCase()))
-    if (city !== 'All Cities') result = result.filter((c) => c.city === city)
-    if (selectedJob) result = [...result].sort((a, b) => computeMatch(b, selectedJob) - computeMatch(a, selectedJob))
-    setFiltered(result)
-  }, [search, city, candidates, selectedJobId])
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role, full_name')
+        .eq('user_id', user.id)
+        .single()
 
-  const checkEmployer = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/auth/signin'); return }
-    const { data: profile } = await supabase.from('profiles').select('role').eq('user_id', user.id).single()
-    if (profile?.role !== 'employer') { router.push('/dashboard'); return }
-    setIsEmployer(true)
-    setAuthChecked(true)
-    setCurrentEmployerId(user.id)
-    const { data: jobs } = await supabase.from('opportunities').select('id, title, skills_required, work_mode, city').eq('employer_id', user.id).eq('status', 'open')
-    if (jobs) setPostedJobs(jobs as PostedOpportunity[])
-    loadCandidates(user.id)
-  }
+      if (profile?.role !== 'employer') { window.location.href = '/dashboard'; return }
 
-  const loadCandidates = async (empId?: string) => {
-    try {
-      const [{ data }, { data: poolData }] = await Promise.all([
-        supabase.from('profiles').select('*, seeker_profiles(*)').eq('role', 'seeker').limit(50),
-        empId ? supabase.from('talent_pool').select('seeker_id').eq('employer_id', empId) : Promise.resolve({ data: [] }),
-      ])
-      const poolSet = new Set(((poolData || []) as Record<string, unknown>[]).map(p => p.seeker_id as string))
-      if (data && data.length > 0) {
-        const mapped = data.map((p: Record<string, unknown>) => {
-          const sp = p.seeker_profiles as Record<string, unknown> | null
-          return {
-            id: p.id as string,
-            full_name: p.full_name as string,
-            city: p.city as string,
-            country_of_origin: (sp?.country_of_origin as string) || '',
-            immigration_status: (sp?.immigration_status as string) || '',
-            skills: (sp?.skills as string[]) || [],
-            education: (sp?.education as string) || '',
-            work_preference: (sp?.work_preference as string) || 'any',
-            bio: (sp?.bio as string) || '',
-            linkedin_url: sp?.linkedin_url as string | undefined,
-            resume_path: sp?.resume_path as string | undefined,
-            additional_doc_path: sp?.additional_doc_path as string | undefined,
-            inPool: poolSet.has(p.id as string),
-          }
-        })
-        setCandidates(mapped)
-      }
-    } catch { /* ignore */ }
-  }
+      setEmpId(user.id)
 
-  const togglePool = async (candidateId: string, inPool: boolean) => {
-    if (!currentEmployerId) return
-    setPoolLoadingId(candidateId)
-    if (inPool) {
-      await supabase.from('talent_pool').delete().eq('employer_id', currentEmployerId).eq('seeker_id', candidateId)
-    } else {
-      await supabase.from('talent_pool').insert({ employer_id: currentEmployerId, seeker_id: candidateId })
+      const { data: oppData } = await supabase
+        .from('opportunities')
+        .select('id, title')
+        .eq('employer_id', user.id)
+        .order('created_at', { ascending: false })
+      setOpps(oppData || [])
+
+      await loadCandidates(user.id)
     }
-    setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, inPool: !inPool } : c))
-    setPoolLoadingId(null)
+    init()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ─── Load candidates ─────────────────────────────────────────────────────
+  const loadCandidates = useCallback(async (employerId: string) => {
+    setLoading(true)
+    setLoadError('')
+    try {
+      // Step 1: load all seeker profiles
+      const { data: profiles, error: pErr } = await supabase
+        .from('profiles')
+        .select('user_id, full_name, city')
+        .eq('role', 'seeker')
+        .limit(200)
+
+      if (pErr) {
+        setLoadError(`Could not load profiles: ${pErr.message}`)
+        setAll([])
+        return
+      }
+
+      if (!profiles || profiles.length === 0) {
+        setAll([])
+        return
+      }
+
+      const seekerIds = profiles.map(p => p.user_id as string)
+
+      // Step 2: seeker_profiles + talent_pool in parallel
+      // Use select('*') to handle any extra columns added via migrations
+      const [{ data: spData, error: spErr }, { data: poolData }] = await Promise.all([
+        supabase
+          .from('seeker_profiles')
+          .select('*')
+          .in('user_id', seekerIds),
+        supabase
+          .from('talent_pool')
+          .select('seeker_id')
+          .eq('employer_id', employerId),
+      ])
+
+      if (spErr) {
+        console.error('seeker_profiles error:', spErr)
+        // Don't bail — show candidates with empty skill data
+      }
+
+      const spMap = new Map((spData || []).map(s => [s.user_id as string, s]))
+      const poolSet = new Set((poolData || []).map(p => p.seeker_id as string))
+
+      const candidates: Candidate[] = profiles.map(p => {
+        const sp = spMap.get(p.user_id as string)
+        return {
+          id:                p.user_id as string,
+          fullName:          (p.full_name as string) || 'Anonymous',
+          city:              (p.city as string) || null,
+          countryOfOrigin:   sp?.country_of_origin || null,
+          immigrationStatus: sp?.immigration_status || null,
+          skills:            Array.isArray(sp?.skills) ? (sp.skills as string[]) : [],
+          education:         sp?.education || null,
+          bio:               sp?.bio || null,
+          linkedinUrl:       sp?.linkedin_url || null,
+          resumePath:        sp?.resume_path || null,
+          additionalDocPath: sp?.additional_doc_path || null,
+          workPreference:    sp?.work_preference || null,
+          inPool:            poolSet.has(p.user_id as string),
+          matchedSkills:     [],
+        }
+      })
+
+      setAll(candidates)
+
+      // Derive all unique skills for autocomplete
+      const skillSet = new Set<string>()
+      candidates.forEach(c => c.skills.forEach(s => skillSet.add(s)))
+      setAllSkills([...skillSet].sort())
+    } catch (err) {
+      console.error('loadCandidates error:', err)
+      setLoadError('Unexpected error loading candidates.')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  // ─── Skill autocomplete ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!skillInput.trim()) { setSuggestions([]); return }
+    const q = skillInput.toLowerCase()
+    setSuggestions(
+      allSkills
+        .filter(s => s.toLowerCase().includes(q) && !selectedSkills.includes(s))
+        .slice(0, 8)
+    )
+  }, [skillInput, allSkills, selectedSkills])
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (skillRef.current && !skillRef.current.contains(e.target as Node)) {
+        setShowSugg(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const addSkill = (skill: string) => {
+    if (!selectedSkills.includes(skill)) setSelected(prev => [...prev, skill])
+    setSkillInput('')
+    setShowSugg(false)
   }
 
-  const downloadDoc = async (path: string, label: string, candidateId: string) => {
-    setDownloadingId(candidateId + label)
-    const { data, error } = await supabase.storage.from('candidate-documents').createSignedUrl(path, 3600)
-    setDownloadingId(null)
-    if (error || !data?.signedUrl) { alert('Could not generate download link. Please try again.'); return }
-    window.open(data.signedUrl, '_blank')
+  const removeSkill = (skill: string) => setSelected(prev => prev.filter(s => s !== skill))
+
+  const handleSkillKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'Enter' || e.key === ',') && skillInput.trim()) {
+      e.preventDefault()
+      const exact = allSkills.find(s => s.toLowerCase() === skillInput.trim().toLowerCase())
+      addSkill(exact || skillInput.trim())
+    }
+    if (e.key === 'Backspace' && !skillInput && selectedSkills.length) {
+      removeSkill(selectedSkills[selectedSkills.length - 1])
+    }
   }
 
-  if (!authChecked) return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="w-8 h-8 border-4 border-gray-400 border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
+  // ─── Filtering + sorting ─────────────────────────────────────────────────
+  const filtered: Candidate[] = allCandidates
+    .map(c => ({
+      ...c,
+      matchedSkills: selectedSkills.filter(s =>
+        c.skills.some(cs => cs.toLowerCase() === s.toLowerCase())
+      ),
+    }))
+    .filter(c => {
+      if (selectedSkills.length > 0 && c.matchedSkills.length < selectedSkills.length) return false
+      if (cityFilter.trim() && !c.city?.toLowerCase().includes(cityFilter.trim().toLowerCase())) return false
+      // compare using DB value directly (both are already lowercase DB codes)
+      if (workMode !== 'any' && c.workPreference !== workMode) return false
+      if (immStatus !== 'any' && c.immigrationStatus !== immStatus) return false
+      if (hasResume && !c.resumePath) return false
+      return true
+    })
+    .sort((a, b) => {
+      if (sortBy === 'match') {
+        const diff = b.matchedSkills.length - a.matchedSkills.length
+        return diff !== 0 ? diff : a.fullName.localeCompare(b.fullName)
+      }
+      if (sortBy === 'name') return a.fullName.localeCompare(b.fullName)
+      return 0
+    })
 
+  const activeFilterCount =
+    selectedSkills.length +
+    (cityFilter.trim() ? 1 : 0) +
+    (workMode !== 'any' ? 1 : 0) +
+    (immStatus !== 'any' ? 1 : 0) +
+    (hasResume ? 1 : 0)
+
+  const clearAll = () => {
+    setSelected([])
+    setCityFilter('')
+    setWorkMode('any')
+    setImmStatus('any')
+    setHasResume(false)
+    setSkillInput('')
+  }
+
+  // ─── Pool toggle ─────────────────────────────────────────────────────────
+  const togglePool = async (candidateId: string, currentlyIn: boolean) => {
+    if (!empId) return
+    setPoolLoading(prev => ({ ...prev, [candidateId]: true }))
+    try {
+      if (currentlyIn) {
+        await supabase
+          .from('talent_pool')
+          .delete()
+          .eq('employer_id', empId)
+          .eq('seeker_id', candidateId)
+      } else {
+        await supabase
+          .from('talent_pool')
+          .upsert({ employer_id: empId, seeker_id: candidateId }, { onConflict: 'employer_id,seeker_id' })
+      }
+      setAll(prev => prev.map(c => c.id === candidateId ? { ...c, inPool: !currentlyIn } : c))
+    } finally {
+      setPoolLoading(prev => ({ ...prev, [candidateId]: false }))
+    }
+  }
+
+  // ─── Start conversation ──────────────────────────────────────────────────
+  const startConversation = async (candidateId: string) => {
+    if (!empId) return
+    const { data: existing } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('employer_id', empId)
+      .eq('seeker_id', candidateId)
+      .is('opportunity_id', null)
+      .maybeSingle()
+
+    let convId = existing?.id
+    if (!convId) {
+      const { data: created } = await supabase
+        .from('conversations')
+        .insert({ employer_id: empId, seeker_id: candidateId, opportunity_id: null })
+        .select('id')
+        .single()
+      convId = created?.id
+    }
+    if (convId) window.location.href = `/messages/${convId}`
+  }
+
+  // ─── Resume download ─────────────────────────────────────────────────────
+  const getResumeUrl = async (path: string) => {
+    const { data } = await supabase.storage.from('candidate-documents').createSignedUrl(path, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  // helper: immigration status code → display label
+  const immLabel = (code: string | null) =>
+    IMM_STATUS_OPTIONS.find(o => o.value === code)?.label ?? code ?? '—'
+
+  // helper: work preference code → display label
+  const workLabel = (code: string | null) =>
+    WORK_MODE_OPTIONS.find(o => o.value === code)?.label ?? code ?? '—'
+
+  // ─── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="bg-gradient-to-br from-gray-800 to-gray-900 text-white py-14">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h1 className="text-3xl sm:text-4xl font-bold mb-3">Find Skilled Candidates</h1>
-          <p className="text-gray-300 text-lg mb-8">Browse profiles of motivated job seekers ready to contribute to your business</p>
-          <div className="relative max-w-2xl">
-            <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by skill, education, or name..." className="w-full pl-12 pr-4 py-4 rounded-xl text-gray-900 text-base focus:outline-none focus:ring-2 focus:ring-red-400 shadow-lg" />
+      {/* Sticky sub-header */}
+      <div className="bg-white border-b border-gray-200 sticky top-16 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Find Candidates</h1>
+              <p className="text-sm text-gray-500">
+                {loading
+                  ? 'Loading…'
+                  : `${filtered.length} candidate${filtered.length !== 1 ? 's' : ''} found`}
+                {!loading && activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount > 1 ? 's' : ''} active`}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/talent-pool"
+                className="flex items-center gap-1.5 text-sm text-gray-600 hover:text-red-600 border border-gray-200 px-3 py-2 rounded-lg hover:border-red-300 transition-colors"
+              >
+                <BookmarkCheck size={15} /> Talent Pool
+              </Link>
+              <button
+                onClick={() => setShowFilters(v => !v)}
+                className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border transition-colors lg:hidden ${
+                  showFilters || activeFilterCount > 0
+                    ? 'bg-red-50 border-red-300 text-red-700'
+                    : 'border-gray-200 text-gray-600'
+                }`}
+              >
+                <SlidersHorizontal size={15} />
+                Filters
+                {activeFilterCount > 0 && (
+                  <span className="ml-1 bg-red-600 text-white text-[10px] font-bold min-w-[17px] h-[17px] rounded-full flex items-center justify-center px-0.5">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex flex-wrap gap-3 mb-6 items-center">
-          <div className="flex items-center gap-2 text-gray-500 text-sm"><SlidersHorizontal size={16} /> Filter:</div>
-          <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-2">
-            <MapPin size={14} className="text-gray-400" />
-            <select value={city} onChange={(e) => setCity(e.target.value)} className="py-2 text-sm text-gray-700 focus:outline-none bg-transparent">
-              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <span className="ml-auto text-sm text-gray-500">{filtered.length} candidates</span>
-        </div>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="flex flex-col lg:flex-row gap-6">
 
-        {isEmployer && postedJobs.length > 0 && (
-          <div className="bg-white border border-gray-200 rounded-xl p-4 mb-6 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <Briefcase size={16} className="text-red-500" />
-              Match candidates against:
-            </div>
-            <div className="relative flex-1 min-w-48">
-              <select
-                value={selectedJobId}
-                onChange={(e) => setSelectedJobId(e.target.value)}
-                className="w-full appearance-none bg-gray-50 border border-gray-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-red-500"
-              >
-                <option value="">— Select one of your opportunities —</option>
-                {postedJobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
-              </select>
-              <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-            </div>
-            {selectedJob && <span className="text-xs text-gray-400">Candidates sorted by match %</span>}
-          </div>
-        )}
+          {/* ── Sidebar ─────────────────────────────────────────────────── */}
+          <aside className={`lg:w-72 flex-shrink-0 ${showFilters ? 'block' : 'hidden lg:block'}`}>
+            <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-5 sticky top-36">
 
-        {filtered.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">No candidates found.</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map((candidate) => {
-              const matchPct = selectedJob ? computeMatch(candidate, selectedJob) : null
-              return (
-                <div key={candidate.id} className="bg-white rounded-2xl border border-gray-200 p-5 hover:shadow-md transition-shadow hover:border-gray-300">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="w-12 h-12 bg-gradient-to-br from-red-500 to-red-700 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                      {candidate.full_name.charAt(0)}
-                    </div>
-                    {candidate.linkedin_url && (
-                      <a href={candidate.linkedin_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700">
-                        <ExternalLink size={16} />
-                      </a>
+              {/* Skills */}
+              <div ref={skillRef}>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Skills <span className="text-gray-300 font-normal normal-case">(AND — must have all)</span>
+                </label>
+                {selectedSkills.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {selectedSkills.map((s, i) => (
+                      <span key={s} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${chipColour(i)}`}>
+                        {s}
+                        <button onClick={() => removeSkill(s)}><X size={10} /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="relative">
+                  <div className="flex items-center gap-2 border border-gray-300 rounded-xl px-3 py-2 focus-within:ring-2 focus-within:ring-red-500 bg-white">
+                    <Search size={14} className="text-gray-400 flex-shrink-0" />
+                    <input
+                      type="text"
+                      value={skillInput}
+                      onChange={e => { setSkillInput(e.target.value); setShowSugg(true) }}
+                      onFocus={() => setShowSugg(true)}
+                      onKeyDown={handleSkillKey}
+                      placeholder="e.g. React, Excel…"
+                      className="flex-1 text-sm text-gray-800 placeholder-gray-400 bg-transparent outline-none min-w-0"
+                    />
+                    {skillInput && (
+                      <button onClick={() => setSkillInput('')} className="text-gray-300 hover:text-red-400">
+                        <X size={13} />
+                      </button>
                     )}
                   </div>
-                  <h3 className="font-bold text-gray-900 text-lg">{candidate.full_name}</h3>
-                  <div className="flex flex-wrap gap-2 mt-1 mb-3 text-xs text-gray-500">
-                    <span className="flex items-center gap-1"><MapPin size={12} />{candidate.city}</span>
-                    {candidate.country_of_origin && <span className="flex items-center gap-1"><Globe size={12} />From {candidate.country_of_origin}</span>}
-                    <span className="flex items-center gap-1"><Briefcase size={12} />{modeLabels[candidate.work_preference] || 'Any'}</span>
-                  </div>
-                  {candidate.immigration_status && (
-                    <span className="inline-block text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full mb-3">
-                      {statusLabels[candidate.immigration_status] || candidate.immigration_status}
-                    </span>
-                  )}
-                  {candidate.bio && <p className="text-gray-600 text-sm line-clamp-2 mb-3">{candidate.bio}</p>}
-                  {candidate.education && <p className="text-xs text-gray-500 mb-3">{candidate.education}</p>}
-                  <div className="flex flex-wrap gap-1.5 mb-3">
-                    {candidate.skills.slice(0, 4).map((s) => (
-                      <span key={s} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
-                    ))}
-                    {candidate.skills.length > 4 && <span className="text-xs text-gray-400">+{candidate.skills.length - 4}</span>}
-                  </div>
-
-                  {matchPct !== null && <MatchBar pct={matchPct} />}
-
-                  {isEmployer && (
-                    <div className={`flex items-center justify-between ${matchPct !== null ? 'mt-3' : 'pt-3 border-t border-gray-100 mt-3'}`}>
-                      <button
-                        onClick={() => togglePool(candidate.id, !!candidate.inPool)}
-                        disabled={poolLoadingId === candidate.id}
-                        title={candidate.inPool ? 'Remove from Talent Pool' : 'Save to Talent Pool'}
-                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50 ${
-                          candidate.inPool
-                            ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                            : 'bg-gray-100 text-gray-500 hover:bg-purple-50 hover:text-purple-600'
-                        }`}
-                      >
-                        {poolLoadingId === candidate.id
-                          ? <div className="w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
-                          : candidate.inPool ? <BookmarkCheck size={12} /> : <BookmarkPlus size={12} />}
-                        {candidate.inPool ? 'In Pool' : 'Save to Pool'}
-                      </button>
-                    </div>
-                  )}
-                  {isEmployer && (candidate.resume_path || candidate.additional_doc_path) && (
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {candidate.resume_path && (
-                        <button
-                          onClick={() => downloadDoc(candidate.resume_path!, 'resume', candidate.id)}
-                          disabled={downloadingId === candidate.id + 'resume'}
-                          className="flex items-center gap-1.5 text-xs bg-red-50 hover:bg-red-100 text-red-700 px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50"
-                        >
-                          {downloadingId === candidate.id + 'resume' ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" /> : <Download size={12} />}
-                          Resume
-                        </button>
-                      )}
-                      {candidate.additional_doc_path && (
-                        <button
-                          onClick={() => downloadDoc(candidate.additional_doc_path!, 'additional', candidate.id)}
-                          disabled={downloadingId === candidate.id + 'additional'}
-                          className="flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50"
-                        >
-                          {downloadingId === candidate.id + 'additional' ? <div className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" /> : <FileText size={12} />}
-                          Document
-                        </button>
-                      )}
-                    </div>
+                  {showSugg && suggestions.length > 0 && (
+                    <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                      {suggestions.map(s => (
+                        <li key={s}>
+                          <button
+                            type="button"
+                            onMouseDown={() => addSkill(s)}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700"
+                          >
+                            {s}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
+                <p className="text-xs text-gray-400 mt-1.5">Type a skill and press Enter to add</p>
+              </div>
+
+              {/* City */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">City</label>
+                <div className="flex items-center gap-2 border border-gray-300 rounded-xl px-3 py-2 focus-within:ring-2 focus-within:ring-red-500 bg-white">
+                  <MapPin size={14} className="text-gray-400 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={cityFilter}
+                    onChange={e => setCityFilter(e.target.value)}
+                    placeholder="Toronto, Vancouver…"
+                    className="flex-1 text-sm text-gray-800 placeholder-gray-400 bg-transparent outline-none"
+                  />
+                  {cityFilter && (
+                    <button onClick={() => setCityFilter('')} className="text-gray-300 hover:text-red-400">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Work mode */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Work Mode</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {WORK_MODE_OPTIONS.map(m => (
+                    <button
+                      key={m.value}
+                      onClick={() => setWorkMode(m.value)}
+                      className={`text-xs py-1.5 rounded-lg border font-medium transition-colors ${
+                        workMode === m.value
+                          ? 'bg-red-600 text-white border-red-600'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Immigration status */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Immigration Status</label>
+                <div className="relative">
+                  <select
+                    value={immStatus}
+                    onChange={e => setImmStatus(e.target.value)}
+                    className="w-full appearance-none border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-red-500 pr-8"
+                  >
+                    {IMM_STATUS_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Has Resume toggle */}
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hasResume}
+                  onClick={() => setHasResume(v => !v)}
+                  className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${hasResume ? 'bg-red-600' : 'bg-gray-200'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${hasResume ? 'translate-x-4' : ''}`} />
+                </button>
+                <span className="text-sm text-gray-700">Has resume uploaded</span>
+              </label>
+
+              {/* Sort */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Sort by</label>
+                <div className="space-y-1">
+                  {SORT_OPTIONS.map(o => (
+                    <button
+                      key={o.key}
+                      onClick={() => setSortBy(o.key)}
+                      className={`w-full flex items-center justify-between text-sm px-3 py-1.5 rounded-lg transition-colors ${
+                        sortBy === o.key ? 'bg-red-50 text-red-700 font-semibold' : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {o.label}
+                      {sortBy === o.key && <Check size={14} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {activeFilterCount > 0 && (
+                <button
+                  onClick={clearAll}
+                  className="w-full text-sm text-red-600 hover:text-red-700 font-medium py-2 border border-red-200 rounded-xl hover:bg-red-50 transition-colors"
+                >
+                  Clear all filters
+                </button>
+              )}
+            </div>
+          </aside>
+
+          {/* ── Candidate grid ───────────────────────────────────────────── */}
+          <div className="flex-1 min-w-0">
+
+            {/* Active filter pills */}
+            {activeFilterCount > 0 && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {selectedSkills.map((s, i) => (
+                  <span key={s} className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-medium ${chipColour(i)}`}>
+                    {s} <button onClick={() => removeSkill(s)}><X size={10} /></button>
+                  </span>
+                ))}
+                {cityFilter.trim() && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full border border-gray-200 font-medium">
+                    📍 {cityFilter} <button onClick={() => setCityFilter('')}><X size={10} /></button>
+                  </span>
+                )}
+                {workMode !== 'any' && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full border border-gray-200 font-medium">
+                    💼 {workLabel(workMode)} <button onClick={() => setWorkMode('any')}><X size={10} /></button>
+                  </span>
+                )}
+                {immStatus !== 'any' && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full border border-gray-200 font-medium">
+                    🍁 {immLabel(immStatus)} <button onClick={() => setImmStatus('any')}><X size={10} /></button>
+                  </span>
+                )}
+                {hasResume && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 px-2.5 py-1 rounded-full border border-gray-200 font-medium">
+                    📄 Has Resume <button onClick={() => setHasResume(false)}><X size={10} /></button>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Error state */}
+            {loadError && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 text-red-700 text-sm">
+                {loadError}
+              </div>
+            )}
+
+            {/* Loading state */}
+            {loading ? (
+              <div className="flex items-center justify-center py-24 text-gray-400">
+                <Loader2 size={28} className="animate-spin mr-3" />
+                <span>Loading candidates…</span>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
+                <User size={40} className="text-gray-300 mx-auto mb-3" />
+                {allCandidates.length === 0 ? (
+                  <>
+                    <p className="text-gray-700 font-medium">No candidates have signed up yet</p>
+                    <p className="text-sm text-gray-400 mt-1">Candidates will appear here once job seekers create profiles</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-gray-700 font-medium">No candidates match your filters</p>
+                    <p className="text-sm text-gray-400 mt-1">Try broadening your search</p>
+                    <button
+                      onClick={clearAll}
+                      className="mt-4 text-sm text-red-600 hover:text-red-700 font-medium underline"
+                    >
+                      Clear all filters
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {filtered.map(c => (
+                  <CandidateCard
+                    key={c.id}
+                    candidate={c}
+                    selectedSkills={selectedSkills}
+                    empId={empId}
+                    opps={opps}
+                    poolLoading={!!poolLoading[c.id]}
+                    onTogglePool={togglePool}
+                    onMessage={startConversation}
+                    onResume={getResumeUrl}
+                    immLabel={immLabel}
+                    workLabel={workLabel}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Candidate Card ───────────────────────────────────────────────────────────
+
+interface CardProps {
+  candidate:      Candidate
+  selectedSkills: string[]
+  empId:          string | null
+  opps:           Opportunity[]
+  poolLoading:    boolean
+  onTogglePool:   (id: string, inPool: boolean) => void
+  onMessage:      (id: string) => void
+  onResume:       (path: string) => void
+  immLabel:       (code: string | null) => string
+  workLabel:      (code: string | null) => string
+}
+
+function CandidateCard({
+  candidate: c, selectedSkills, empId, poolLoading,
+  onTogglePool, onMessage, onResume, immLabel, workLabel,
+}: CardProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  const initials = c.fullName
+    .split(' ')
+    .map((w: string) => w[0] || '')
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '?'
+
+  const matchCount    = c.matchedSkills.length
+  const totalSelected = selectedSkills.length
+
+  const scheduleUrl = empId
+    ? `/interviews/new?seekerId=${encodeURIComponent(c.id)}&seekerName=${encodeURIComponent(c.fullName)}`
+    : '#'
+
+  return (
+    <div className={`bg-white border rounded-2xl transition-shadow hover:shadow-md ${
+      totalSelected > 0 && matchCount === totalSelected
+        ? 'border-green-300 ring-1 ring-green-100'
+        : 'border-gray-200'
+    }`}>
+      <div className="p-4">
+
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div className="w-11 h-11 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+            {initials}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-gray-900 text-sm leading-tight truncate">{c.fullName}</h3>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                  {c.city && (
+                    <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                      <MapPin size={10} /> {c.city}
+                    </span>
+                  )}
+                  {c.workPreference && c.workPreference !== 'any' && (
+                    <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                      <Briefcase size={10} /> {workLabel(c.workPreference)}
+                    </span>
+                  )}
+                  {c.immigrationStatus && (
+                    <span className="text-xs text-gray-500 flex items-center gap-0.5">
+                      <Globe size={10} /> {immLabel(c.immigrationStatus)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Skill match badge */}
+              {totalSelected > 0 && (
+                <span className={`flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${
+                  matchCount === totalSelected
+                    ? 'bg-green-100 text-green-700'
+                    : matchCount > 0
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {matchCount}/{totalSelected}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Bio */}
+        {c.bio && (
+          <p className="mt-2.5 text-xs text-gray-500 line-clamp-2 leading-relaxed">{c.bio}</p>
+        )}
+
+        {/* Skills */}
+        {c.skills.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {c.skills.slice(0, expanded ? undefined : 8).map(skill => {
+              const isMatch = c.matchedSkills.some(m => m.toLowerCase() === skill.toLowerCase())
+              return (
+                <span
+                  key={skill}
+                  className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border font-medium ${
+                    isMatch
+                      ? 'bg-green-100 text-green-700 border-green-300'
+                      : 'bg-gray-50 text-gray-600 border-gray-200'
+                  }`}
+                >
+                  {isMatch && <Check size={9} />}
+                  {skill}
+                </span>
               )
             })}
+            {!expanded && c.skills.length > 8 && (
+              <button
+                onClick={() => setExpanded(true)}
+                className="text-xs text-gray-400 hover:text-red-600 px-2 py-0.5 rounded-full border border-dashed border-gray-200 hover:border-red-300 transition-colors"
+              >
+                +{c.skills.length - 8} more
+              </button>
+            )}
           </div>
         )}
+
+        {/* Education (expanded only) */}
+        {expanded && c.education && (
+          <p className="mt-2 text-xs text-gray-500">
+            <span className="font-medium text-gray-700">Education: </span>{c.education}
+          </p>
+        )}
+
+        {/* Action row */}
+        <div className="mt-3 pt-3 border-t border-gray-50 flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => onMessage(c.id)}
+            className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-blue-50 text-gray-600 hover:text-blue-700 border border-gray-200 hover:border-blue-300 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            <MessageSquare size={13} /> Message
+          </button>
+
+          <Link
+            href={scheduleUrl}
+            className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-green-50 text-gray-600 hover:text-green-700 border border-gray-200 hover:border-green-300 px-2.5 py-1.5 rounded-lg transition-colors"
+          >
+            <CalendarPlus size={13} /> Interview
+          </Link>
+
+          {c.resumePath && (
+            <button
+              onClick={() => onResume(c.resumePath!)}
+              className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-amber-50 text-gray-600 hover:text-amber-700 border border-gray-200 hover:border-amber-300 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <FileText size={13} /> Resume
+            </button>
+          )}
+
+          {c.linkedinUrl && (
+            <a
+              href={c.linkedinUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-blue-50 text-gray-600 hover:text-blue-700 border border-gray-200 hover:border-blue-300 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <ExternalLink size={13} /> LinkedIn
+            </a>
+          )}
+
+          <button
+            onClick={() => onTogglePool(c.id, c.inPool)}
+            disabled={poolLoading}
+            className={`ml-auto flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+              c.inPool
+                ? 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-red-300 hover:text-red-600 hover:bg-red-50'
+            }`}
+          >
+            {poolLoading
+              ? <Loader2 size={13} className="animate-spin" />
+              : c.inPool ? <BookmarkCheck size={13} /> : <Bookmark size={13} />
+            }
+            {c.inPool ? 'Saved' : 'Save'}
+          </button>
+        </div>
       </div>
     </div>
   )
