@@ -375,6 +375,9 @@ export default function DashboardPage() {
                 <Link href="/messages" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   <MessageSquarePlus size={16} /> Messages
                 </Link>
+                <Link href="/my-applications" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <Target size={16} /> Track Applications
+                </Link>
                 <Link href="/profile/setup" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   Edit Profile
                 </Link>
@@ -487,9 +490,14 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-bold text-gray-900 text-lg">My Applications</h2>
-                <Link href="/opportunities" className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1">
-                  Browse more <ArrowRight size={14} />
-                </Link>
+                <div className="flex items-center gap-3">
+                  <Link href="/my-applications" className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium">
+                    Track Progress <ArrowRight size={14} />
+                  </Link>
+                  <Link href="/opportunities" className="text-sm text-red-600 hover:text-red-700 flex items-center gap-1">
+                    Browse more <ArrowRight size={14} />
+                  </Link>
+                </div>
               </div>
               {applications.length === 0 ? (
                 <div className="text-center py-10">

@@ -98,6 +98,9 @@ export default function Navbar() {
             {/* Seeker-specific */}
             {isSeeker && (
               <>
+                <Link href="/my-applications" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
+                  My Applications
+                </Link>
                 <Link href="/resume-builder" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Resume Builder
                 </Link>
@@ -175,6 +178,9 @@ export default function Navbar() {
           )}
           {isSeeker && (
             <>
+              <Link href="/my-applications" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                My Applications
+              </Link>
               <Link href="/resume-builder" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Resume Builder
               </Link>
