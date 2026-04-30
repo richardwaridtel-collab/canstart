@@ -39,15 +39,22 @@ export default function OpportunityDetailPage() {
   const loadOpportunity = async () => {
     const { data } = await supabase
       .from('opportunities')
-      .select('*, employer_profiles(company_name)')
+      .select('*')
       .eq('id', id)
       .single()
 
     if (data) {
+      // Fetch company name separately to avoid FK join failures
+      const { data: empProfile } = await supabase
+        .from('employer_profiles')
+        .select('company_name')
+        .eq('user_id', data.employer_id)
+        .single()
+
       setOpportunity({
         ...data,
-        company_name: (data.employer_profiles as { company_name?: string } | null)?.company_name || 'Company',
-        employer_name: (data.employer_profiles as { company_name?: string } | null)?.company_name || 'Company',
+        company_name: empProfile?.company_name || 'CanStart Employer',
+        employer_name: empProfile?.company_name || 'CanStart Employer',
       })
     } else {
       setOpportunity(null)
