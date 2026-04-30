@@ -52,6 +52,7 @@ export interface Opportunity {
   status: Status
   created_at: string
   applications_count?: number
+  application_deadline?: string
 }
 
 export interface Application {

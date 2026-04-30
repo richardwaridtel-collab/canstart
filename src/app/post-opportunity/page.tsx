@@ -25,6 +25,7 @@ export default function PostOpportunityPage() {
     compensation: '',
     experienceLevel: 'any',
     category: 'General',
+    applicationDeadline: '',
   })
 
   useEffect(() => {
@@ -64,6 +65,7 @@ export default function PostOpportunityPage() {
       experience_level: form.experienceLevel,
       category: form.category,
       status: 'open',
+      application_deadline: form.applicationDeadline || null,
     })
 
     if (!error) {
@@ -181,15 +183,27 @@ export default function PostOpportunityPage() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Compensation (optional)</label>
-            <input
-              type="text"
-              value={form.compensation}
-              onChange={(e) => setForm({ ...form, compensation: e.target.value })}
-              placeholder="e.g., $18/hr, $500 stipend, Unpaid (volunteer)"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Compensation (optional)</label>
+              <input
+                type="text"
+                value={form.compensation}
+                onChange={(e) => setForm({ ...form, compensation: e.target.value })}
+                placeholder="e.g., $18/hr, $500 stipend, Unpaid"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Application Deadline (optional)</label>
+              <input
+                type="date"
+                value={form.applicationDeadline}
+                min={new Date().toISOString().split('T')[0]}
+                onChange={(e) => setForm({ ...form, applicationDeadline: e.target.value })}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+              />
+            </div>
           </div>
 
           <div>

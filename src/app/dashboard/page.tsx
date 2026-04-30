@@ -4,12 +4,12 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle, MessageSquarePlus, Star, BookmarkCheck, BarChart2 } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle, MessageSquarePlus, Star, BookmarkCheck, BarChart2, Lock, Unlock } from 'lucide-react'
 import { MatchBattery } from '@/components/MatchBattery'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
 type Application = { id: string; status: string; created_at: string; opportunity?: { title: string; company_name?: string; type: string } }
-type PostedJob = { id: string; title: string; status: string; created_at: string; type: string; applications_count?: number }
+type PostedJob = { id: string; title: string; status: string; created_at: string; type: string; applications_count?: number; application_deadline?: string }
 type ExternalApplication = { id: string; job_title: string; company: string; job_url: string; applied_at: string; external_opportunity_id?: string }
 type PickedJob = {
   match_score: number
@@ -161,6 +161,8 @@ export default function DashboardPage() {
   const [testimonialError, setTestimonialError] = useState('')
   const [testimonialSuccess, setTestimonialSuccess] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [togglingJobId, setTogglingJobId] = useState<string | null>(null)
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
 
   useEffect(() => {
     loadDashboard()
@@ -265,7 +267,7 @@ export default function DashboardPage() {
     } else {
       const { data: jobs } = await supabase
         .from('opportunities')
-        .select('*, applications(count)')
+        .select('id, title, status, created_at, type, application_deadline, applications(count)')
         .eq('employer_id', user.id)
         .order('created_at', { ascending: false })
 
@@ -276,6 +278,7 @@ export default function DashboardPage() {
         created_at: j.created_at as string,
         type: j.type as string,
         applications_count: Array.isArray(j.applications) ? j.applications.length : 0,
+        application_deadline: j.application_deadline as string | undefined,
       })))
 
       // Load top candidate matches (≥75%) for employer's open jobs
@@ -317,6 +320,28 @@ export default function DashboardPage() {
     await supabase.from('external_applications').delete().eq('id', id)
     setExternalApplications((prev) => prev.filter((a) => a.id !== id))
     setDeletingId(null)
+  }
+
+  const toggleJobStatus = async (job: PostedJob) => {
+    if (togglingJobId) return
+    const newStatus = job.status === 'open' ? 'closed' : 'open'
+    setTogglingJobId(job.id)
+    const { error } = await supabase.from('opportunities').update({ status: newStatus }).eq('id', job.id)
+    if (!error) {
+      setPostedJobs((prev) => prev.map((j) => j.id === job.id ? { ...j, status: newStatus } : j))
+    }
+    setTogglingJobId(null)
+  }
+
+  const deleteJob = async (job: PostedJob) => {
+    if (deletingJobId) return
+    if (!window.confirm(`Delete "${job.title}"? This will permanently remove the posting and cannot be undone.`)) return
+    setDeletingJobId(job.id)
+    const { error } = await supabase.from('opportunities').delete().eq('id', job.id)
+    if (!error) {
+      setPostedJobs((prev) => prev.filter((j) => j.id !== job.id))
+    }
+    setDeletingJobId(null)
   }
 
   const submitTestimonial = async (e: React.FormEvent) => {
@@ -702,21 +727,61 @@ export default function DashboardPage() {
               ) : (
                 <div className="space-y-3">
                   {postedJobs.map((job) => (
-                    <div key={job.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-100">
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{job.type} · {new Date(job.created_at).toLocaleDateString()}</p>
+                    <div key={job.id} className={`p-4 rounded-xl border ${job.status === 'open' ? 'bg-gray-50 border-gray-100' : 'bg-orange-50 border-orange-100'}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 text-sm truncate">{job.title}</p>
+                          <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-2">
+                            <span className="capitalize">{job.type}</span>
+                            <span>·</span>
+                            <span>Posted {new Date(job.created_at).toLocaleDateString()}</span>
+                            {job.application_deadline && (
+                              <>
+                                <span>·</span>
+                                <span className="flex items-center gap-0.5 text-orange-600 font-medium">
+                                  <Calendar size={10} /> Deadline: {new Date(job.application_deadline + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </span>
+                              </>
+                            )}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0 ml-1">
+                          <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                            <Users size={12} /> {job.applications_count || 0}
+                          </span>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${job.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                            {job.status === 'open' ? 'Open' : 'Closed'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 ml-3">
-                        <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                          <Users size={12} /> {job.applications_count || 0}
-                        </span>
-                        <span className={`text-xs font-medium px-2 py-1 rounded-full ${job.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                          {job.status}
-                        </span>
-                        <Link href={`/applications/${job.id}`} className="text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1">
-                          <Eye size={14} /> Pipeline
+                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200/70">
+                        <Link href={`/applications/${job.id}`} className="text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-purple-50 transition-colors">
+                          <Eye size={13} /> Pipeline
                         </Link>
+                        <button
+                          onClick={() => toggleJobStatus(job)}
+                          disabled={togglingJobId === job.id}
+                          className={`text-xs font-medium flex items-center gap-1 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${
+                            job.status === 'open'
+                              ? 'text-orange-600 hover:text-orange-800 hover:bg-orange-50'
+                              : 'text-green-600 hover:text-green-800 hover:bg-green-50'
+                          }`}
+                        >
+                          {togglingJobId === job.id
+                            ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                            : job.status === 'open'
+                              ? <><Lock size={13} /> Close Applications</>
+                              : <><Unlock size={13} /> Reopen</>}
+                        </button>
+                        <button
+                          onClick={() => deleteJob(job)}
+                          disabled={deletingJobId === job.id}
+                          className="text-xs font-medium text-red-500 hover:text-red-700 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 ml-auto"
+                        >
+                          {deletingJobId === job.id
+                            ? <div className="w-3 h-3 border border-red-500 border-t-transparent rounded-full animate-spin" />
+                            : <><Trash2 size={13} /> Delete</>}
+                        </button>
                       </div>
                     </div>
                   ))}

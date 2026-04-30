@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import type { Opportunity } from '@/lib/types'
-import { MapPin, Clock, Wifi, Building2, ArrowLeft, CheckCircle, Send, Briefcase, Shield } from 'lucide-react'
+import { MapPin, Clock, Wifi, Building2, ArrowLeft, CheckCircle, Send, Briefcase, Shield, Lock, Calendar } from 'lucide-react'
 import { track } from '@vercel/analytics'
 
 
@@ -113,7 +113,13 @@ export default function OpportunityDetailPage() {
                 <span className={`text-xs font-medium px-2 py-1 rounded-full ${typeColors[opportunity.type]}`}>
                   {typeLabels[opportunity.type]}
                 </span>
-                <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Open</span>
+                {opportunity.status === 'open' ? (
+                  <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">Open</span>
+                ) : (
+                  <span className="text-xs font-medium px-2 py-1 rounded-full bg-orange-100 text-orange-700 flex items-center gap-1">
+                    <Lock size={10} /> Applications Closed
+                  </span>
+                )}
               </div>
               <h1 className="text-2xl font-bold text-gray-900 mb-1">{opportunity.title}</h1>
               <p className="text-red-600 font-semibold mb-4">{opportunity.company_name}</p>
@@ -123,6 +129,11 @@ export default function OpportunityDetailPage() {
                 <span className="flex items-center gap-1.5">{opportunity.work_mode === 'remote' ? <Wifi size={15} /> : <Building2 size={15} />}<span className="capitalize">{opportunity.work_mode}</span></span>
                 <span className="flex items-center gap-1.5"><Clock size={15} />{opportunity.duration}</span>
                 {opportunity.compensation && <span className="flex items-center gap-1.5"><Briefcase size={15} />{opportunity.compensation}</span>}
+                {opportunity.application_deadline && (
+                  <span className="flex items-center gap-1.5 text-orange-600 font-medium">
+                    <Calendar size={15} />Deadline: {new Date(opportunity.application_deadline + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                )}
               </div>
 
               <div className="prose prose-sm max-w-none text-gray-700">
@@ -157,7 +168,14 @@ export default function OpportunityDetailPage() {
           {/* Sidebar / Apply */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-24">
-              {userRole === 'employer' ? (
+              {opportunity.status !== 'open' ? (
+                <div className="text-center py-6">
+                  <Lock size={36} className="mx-auto text-orange-400 mb-3" />
+                  <h3 className="font-semibold text-gray-900 mb-1">Applications Closed</h3>
+                  <p className="text-sm text-gray-500">This employer is no longer accepting applications for this position.</p>
+                  <Link href="/opportunities" className="text-red-600 hover:underline text-sm mt-3 inline-block">Browse open opportunities →</Link>
+                </div>
+              ) : userRole === 'employer' ? (
                 <div className="text-center py-4 text-gray-500 text-sm">
                   <Briefcase size={32} className="mx-auto text-gray-300 mb-2" />
                   Employer accounts cannot apply to opportunities.<br />
