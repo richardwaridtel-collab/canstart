@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useState, useEffect } from 'react'
-import { Menu, X, MapPin, PlusCircle } from 'lucide-react'
+import { Menu, X, MapPin, PlusCircle, MessageSquare } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 const ADMIN_EMAILS = ['richard.waridtel@gmail.com']
@@ -11,16 +11,25 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [user, setUser] = useState<{ email?: string; id?: string } | null>(null)
   const [role, setRole] = useState<string | null>(null)
+  const [unreadCount, setUnreadCount] = useState(0)
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user)
-      if (data.user) fetchRole(data.user.id)
+      if (data.user) {
+        fetchRole(data.user.id)
+        fetchUnread(data.user.id)
+      }
     })
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) fetchRole(session.user.id)
-      else setRole(null)
+      if (session?.user) {
+        fetchRole(session.user.id)
+        fetchUnread(session.user.id)
+      } else {
+        setRole(null)
+        setUnreadCount(0)
+      }
     })
     return () => listener.subscription.unsubscribe()
   }, [])
@@ -28,6 +37,17 @@ export default function Navbar() {
   const fetchRole = async (userId: string) => {
     const { data } = await supabase.from('profiles').select('role').eq('user_id', userId).single()
     setRole(data?.role ?? null)
+  }
+
+  const fetchUnread = async (userId: string) => {
+    try {
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .neq('sender_id', userId)
+        .is('read_at', null)
+      setUnreadCount(count || 0)
+    } catch { /* messaging table not yet created */ }
   }
 
   const handleSignOut = async () => {
@@ -89,6 +109,15 @@ export default function Navbar() {
                 <Link href="/dashboard" className="text-gray-600 hover:text-red-600 font-medium transition-colors">
                   Dashboard
                 </Link>
+                <Link href="/messages" className="relative text-gray-600 hover:text-red-600 font-medium transition-colors flex items-center gap-1">
+                  <MessageSquare size={17} />
+                  <span className="hidden lg:inline">Messages</span>
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[10px] font-bold min-w-[17px] h-[17px] rounded-full flex items-center justify-center px-0.5">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </Link>
                 {isAdmin && (
                   <Link href="/admin" className="text-xs font-semibold bg-gray-800 text-white px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors">
                     Admin
@@ -149,6 +178,12 @@ export default function Navbar() {
             <>
               <Link href="/dashboard" className="block text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
                 Dashboard
+              </Link>
+              <Link href="/messages" className="flex items-center justify-between text-gray-700 hover:text-red-600 font-medium py-2" onClick={() => setMenuOpen(false)}>
+                <span className="flex items-center gap-2"><MessageSquare size={16} /> Messages</span>
+                {unreadCount > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{unreadCount}</span>
+                )}
               </Link>
               {isAdmin && (
                 <Link href="/admin" className="block text-gray-700 font-semibold py-2" onClick={() => setMenuOpen(false)}>

@@ -369,6 +369,9 @@ export default function DashboardPage() {
                 <Link href="/opportunities" className="bg-white text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors">
                   <Briefcase size={16} /> Browse Opportunities
                 </Link>
+                <Link href="/messages" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <MessageSquarePlus size={16} /> Messages
+                </Link>
                 <Link href="/profile/setup" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   Edit Profile
                 </Link>

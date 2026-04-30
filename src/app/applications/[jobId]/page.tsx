@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, MapPin, Globe, Briefcase, Download, ExternalLink,
   Users, ChevronRight, ChevronLeft, Pencil, Check, X,
-  BookmarkPlus, BookmarkCheck, Tag, ChevronDown, ChevronUp,
+  BookmarkPlus, BookmarkCheck, Tag, ChevronDown, ChevronUp, MessageSquare,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ export default function PipelinePage() {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
   const [poolLoadingId, setPoolLoadingId] = useState<string | null>(null)
   const [currentEmployerId, setCurrentEmployerId] = useState<string | null>(null)
+  const [messagingId, setMessagingId] = useState<string | null>(null)
 
   useEffect(() => { checkAuth() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -202,6 +203,28 @@ export default function PipelinePage() {
       : [...currentTags, tag]
     await supabase.from('applications').update({ tags: newTags }).eq('id', appId)
     setApplicants(prev => prev.map(a => a.id === appId ? { ...a, tags: newTags } : a))
+  }
+
+  const startConversation = async (seekerId: string) => {
+    if (!currentEmployerId) return
+    setMessagingId(seekerId)
+    // Check for existing conversation
+    const { data: existing } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('employer_id', currentEmployerId)
+      .eq('seeker_id', seekerId)
+      .eq('opportunity_id', jobId)
+      .maybeSingle()
+    if (existing) { router.push(`/messages/${existing.id}`); return }
+    // Create new conversation
+    const { data: created } = await supabase
+      .from('conversations')
+      .insert({ employer_id: currentEmployerId, seeker_id: seekerId, opportunity_id: jobId })
+      .select('id')
+      .single()
+    setMessagingId(null)
+    if (created) router.push(`/messages/${created.id}`)
   }
 
   const togglePool = async (seekerId: string, inPool: boolean) => {
@@ -330,6 +353,8 @@ export default function PipelinePage() {
                           onToggleTag={(tag) => toggleTag(app.id, tag, app.tags)}
                           onDownloadResume={() => downloadResume(app.resume_path!, app.seeker_id)}
                           onTogglePool={() => togglePool(app.seeker_id, !!app.inPool)}
+                          onMessage={() => startConversation(app.seeker_id)}
+                          messagingLoading={messagingId === app.seeker_id}
                           predefinedTags={PREDEFINED_TAGS}
                           tagColors={TAG_COLORS}
                           immigrationLabels={IMMIGRATION_LABELS}
@@ -372,6 +397,8 @@ type CardProps = {
   onToggleTag: (tag: string) => void
   onDownloadResume: () => void
   onTogglePool: () => void
+  onMessage: () => void
+  messagingLoading: boolean
   predefinedTags: string[]
   tagColors: Record<string, string>
   immigrationLabels: Record<string, string>
@@ -383,8 +410,8 @@ function CandidateCard({
   app, stage, stageIdx, totalStages, moving, editingNotes, savingNotes,
   noteDraft, downloadingResume, poolLoading, expanded, onToggleExpand,
   onMove, onEditNotes, onCancelNotes, onNoteDraftChange, onSaveNotes,
-  onToggleTag, onDownloadResume, onTogglePool, predefinedTags,
-  tagColors, immigrationLabels, modeLabels, stages,
+  onToggleTag, onDownloadResume, onTogglePool, onMessage, messagingLoading,
+  predefinedTags, tagColors, immigrationLabels, modeLabels, stages,
 }: CardProps) {
   const [showTagPicker, setShowTagPicker] = useState(false)
 
@@ -554,8 +581,18 @@ function CandidateCard({
             )}
           </div>
 
-          {/* Document links */}
+          {/* Document links + Message */}
           <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={onMessage}
+              disabled={messagingLoading}
+              className="flex items-center gap-1 text-xs bg-red-50 hover:bg-red-100 text-red-700 px-2.5 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50"
+            >
+              {messagingLoading
+                ? <div className="w-3 h-3 border border-red-400 border-t-transparent rounded-full animate-spin" />
+                : <MessageSquare size={11} />}
+              Message
+            </button>
             {app.resume_path && (
               <button
                 onClick={onDownloadResume}
