@@ -675,7 +675,7 @@ function CandidateCard({
                 <p className="text-xs font-semibold text-indigo-700">Interview Progress</p>
               </div>
 
-              {/* Sequential round tracker */}
+              {/* Sequential round tracker — each row is a clickable button */}
               {(() => {
                 const currentRoundIdx = INTERVIEW_SUB_STAGES.findIndex(s => s.key === interviewStage)
                 const nextRound = currentRoundIdx === -1
@@ -690,32 +690,36 @@ function CandidateCard({
                       {INTERVIEW_SUB_STAGES.map((sub, idx) => {
                         const isCompleted = currentRoundIdx !== -1 && idx < currentRoundIdx
                         const isCurrent   = interviewStage === sub.key
-                        const isUpcoming  = !isCompleted && !isCurrent
+                        const loading     = settingInterviewStage && isCurrent
 
                         return (
-                          <div
+                          <button
                             key={sub.key}
-                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors ${
-                              isCompleted ? 'bg-green-50 border-green-200' :
-                              isCurrent   ? `${sub.active} border-transparent` :
-                              'bg-gray-50 border-gray-200 opacity-50'
+                            onClick={() => onSetInterviewStage(isCurrent ? '' : sub.key)}
+                            disabled={settingInterviewStage}
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
+                              isCompleted ? 'bg-green-50 border-green-200 hover:bg-green-100' :
+                              isCurrent   ? `${sub.active} border-transparent hover:opacity-90` :
+                              `${sub.bg} ${sub.border} ${sub.color} hover:brightness-95`
                             }`}
                           >
-                            {isCompleted
+                            {loading
+                              ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                              : isCompleted
                               ? <Check size={12} className="text-green-600 flex-shrink-0" />
                               : isCurrent
                               ? <span className="w-2.5 h-2.5 rounded-full border-2 border-white/60 bg-white/30 flex-shrink-0" />
-                              : <Circle size={12} className="text-gray-300 flex-shrink-0" />}
+                              : <Circle size={12} className="flex-shrink-0 opacity-40" />}
                             <span className={
                               isCompleted ? 'text-green-700' :
                               isCurrent   ? 'text-white' :
-                              'text-gray-400'
+                              sub.color
                             }>
                               {sub.label}
                             </span>
                             {isCompleted && <span className="ml-auto text-[10px] text-green-500 font-normal">Done</span>}
                             {isCurrent   && <span className="ml-auto text-[10px] text-white/70 font-normal">Active</span>}
-                          </div>
+                          </button>
                         )
                       })}
                     </div>
