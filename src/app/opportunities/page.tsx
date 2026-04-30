@@ -502,6 +502,7 @@ function OpportunitiesInner() {
   useEffect(() => {
     checkAuth()
     loadExternalJobs()
+    loadCanstartJobs()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Read ?city= query param from home page city links
@@ -586,7 +587,6 @@ function OpportunitiesInner() {
         const { data: extApps } = await supabase.from('external_applications').select('external_opportunity_id').eq('seeker_id', user.id)
         if (extApps) setAppliedJobIds(new Set(extApps.map((a: { external_opportunity_id: string }) => a.external_opportunity_id)))
       }
-      loadCanstartJobs()
     }
   }
 
@@ -629,9 +629,26 @@ function OpportunitiesInner() {
   const loadCanstartJobs = async () => {
     setLoading(true)
     try {
-      const { data } = await supabase.from('opportunities').select('*, employer_profiles(company_name)').eq('status', 'open').order('created_at', { ascending: false })
-      if (data) {
-        setCanstartJobs(data.map((o: Record<string, unknown>) => ({ ...o, company_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company', employer_name: (o.employer_profiles as { company_name?: string } | null)?.company_name || 'Company' })) as Opportunity[])
+      const { data } = await supabase
+        .from('opportunities')
+        .select('*')
+        .eq('status', 'open')
+        .order('created_at', { ascending: false })
+
+      if (data && data.length > 0) {
+        // Fetch company names separately to avoid FK join failures
+        const employerIds = [...new Set(data.map((o: Record<string, unknown>) => o.employer_id as string))]
+        const { data: profiles } = await supabase
+          .from('employer_profiles')
+          .select('user_id, company_name')
+          .in('user_id', employerIds)
+        const profileMap = new Map((profiles || []).map((p: Record<string, unknown>) => [p.user_id as string, p.company_name as string]))
+
+        setCanstartJobs(data.map((o: Record<string, unknown>) => ({
+          ...o,
+          company_name: profileMap.get(o.employer_id as string) || 'CanStart Employer',
+          employer_name: profileMap.get(o.employer_id as string) || 'CanStart Employer',
+        })) as Opportunity[])
       }
     } catch { /* ignore */ } finally { setLoading(false) }
   }
