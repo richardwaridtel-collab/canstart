@@ -471,6 +471,7 @@ function CandidateCard({
   scheduleUrl, predefinedTags, tagColors, immigrationLabels, modeLabels, stages,
 }: CardProps) {
   const [showTagPicker, setShowTagPicker] = useState(false)
+  const [confirmRound, setConfirmRound] = useState<string | null>(null)
 
   const prevStage = stageIdx > 0 ? stages[stageIdx - 1] : null
   const nextStage = stageIdx < stages.length - 1 ? stages[stageIdx + 1] : null
@@ -675,8 +676,48 @@ function CandidateCard({
                 <p className="text-xs font-semibold text-indigo-700">Interview Progress</p>
               </div>
 
-              {/* Sequential round tracker — each row is a clickable button */}
-              {(() => {
+              {/* ── Inline confirmation popup ─────────────────────── */}
+              {confirmRound && (() => {
+                const sub = INTERVIEW_SUB_STAGES.find(s => s.key === confirmRound)!
+                const currentSub = INTERVIEW_SUB_STAGES.find(s => s.key === interviewStage)
+                const isAdvancing = !!interviewStage && interviewStage !== confirmRound
+                return (
+                  <div className="m-2 p-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <CalendarPlus size={13} className="text-indigo-600 flex-shrink-0" />
+                      <p className="text-xs font-bold text-indigo-800">
+                        Call for {sub.label}
+                      </p>
+                    </div>
+                    <p className="text-xs text-indigo-600 mb-3 leading-relaxed">
+                      {isAdvancing
+                        ? `This marks ${currentSub?.label} as complete and calls ${app.full_name} for ${sub.label}.`
+                        : `Schedule ${app.full_name} for ${sub.label}.`}
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { onSetInterviewStage(confirmRound); setConfirmRound(null) }}
+                        disabled={settingInterviewStage}
+                        className="flex-1 flex items-center justify-center text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        {settingInterviewStage
+                          ? <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
+                          : 'Confirm'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmRound(null)}
+                        disabled={settingInterviewStage}
+                        className="flex-1 text-xs font-medium text-gray-600 bg-white hover:bg-gray-50 border border-gray-200 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* ── Sequential round tracker ─────────────────────────── */}
+              {!confirmRound && (() => {
                 const currentRoundIdx = INTERVIEW_SUB_STAGES.findIndex(s => s.key === interviewStage)
                 const nextRound = currentRoundIdx === -1
                   ? INTERVIEW_SUB_STAGES[0]
@@ -690,12 +731,11 @@ function CandidateCard({
                       {INTERVIEW_SUB_STAGES.map((sub, idx) => {
                         const isCompleted = currentRoundIdx !== -1 && idx < currentRoundIdx
                         const isCurrent   = interviewStage === sub.key
-                        const loading     = settingInterviewStage && isCurrent
 
                         return (
                           <button
                             key={sub.key}
-                            onClick={() => onSetInterviewStage(isCurrent ? '' : sub.key)}
+                            onClick={() => setConfirmRound(sub.key)}
                             disabled={settingInterviewStage}
                             className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
                               isCompleted ? 'bg-green-50 border-green-200 hover:bg-green-100' :
@@ -703,18 +743,12 @@ function CandidateCard({
                               `${sub.bg} ${sub.border} ${sub.color} hover:brightness-95`
                             }`}
                           >
-                            {loading
-                              ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                              : isCompleted
+                            {isCompleted
                               ? <Check size={12} className="text-green-600 flex-shrink-0" />
                               : isCurrent
                               ? <span className="w-2.5 h-2.5 rounded-full border-2 border-white/60 bg-white/30 flex-shrink-0" />
                               : <Circle size={12} className="flex-shrink-0 opacity-40" />}
-                            <span className={
-                              isCompleted ? 'text-green-700' :
-                              isCurrent   ? 'text-white' :
-                              sub.color
-                            }>
+                            <span className={isCompleted ? 'text-green-700' : isCurrent ? 'text-white' : sub.color}>
                               {sub.label}
                             </span>
                             {isCompleted && <span className="ml-auto text-[10px] text-green-500 font-normal">Done</span>}
@@ -728,13 +762,11 @@ function CandidateCard({
                     {nextRound && (
                       <div className="px-2 pb-2">
                         <button
-                          onClick={() => onSetInterviewStage(nextRound.key)}
+                          onClick={() => setConfirmRound(nextRound.key)}
                           disabled={settingInterviewStage}
                           className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition-colors disabled:opacity-50"
                         >
-                          {settingInterviewStage
-                            ? <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
-                            : <><CalendarPlus size={11} /> Call for {nextRound.label}</>}
+                          <CalendarPlus size={11} /> Call for {nextRound.label}
                         </button>
                       </div>
                     )}
@@ -839,16 +871,13 @@ function CandidateCard({
         ) : <div className="w-6" />}
       </div>
 
-      {/* Call for Initial Interview — CTA at bottom of Interview cards with no round set yet */}
-      {stage.key === 'interview' && !interviewStage && (
+      {/* Call for Initial Interview — expands the card to show the confirmation flow */}
+      {stage.key === 'interview' && !interviewStage && !expanded && (
         <button
-          onClick={() => onSetInterviewStage('initial_interview')}
-          disabled={settingInterviewStage || moving}
-          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white py-2 transition-colors rounded-b-xl disabled:opacity-50"
+          onClick={onToggleExpand}
+          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white py-2 transition-colors rounded-b-xl"
         >
-          {settingInterviewStage
-            ? <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
-            : <><CalendarPlus size={12} /> Call for Initial Interview</>}
+          <CalendarPlus size={12} /> Call for Interview
         </button>
       )}
     </div>
