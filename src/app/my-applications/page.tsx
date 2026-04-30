@@ -26,6 +26,7 @@ type StageName = typeof STAGES[number]['key']
 type Application = {
   id: string
   pipeline_stage: StageName
+  interview_stage: string | null
   stage_history: { stage: string; at: string }[]
   stage_updated_at: string
   created_at: string
@@ -34,8 +35,14 @@ type Application = {
     title: string
     type: string
     city?: string
-    employer_profiles?: { company_name?: string } | null
+    company_name?: string
   } | null
+}
+
+const INTERVIEW_SUB_STAGES: Record<string, string> = {
+  initial_interview:          'Initial Interview',
+  hiring_manager_interview:   'Hiring Manager Interview',
+  final_interview:            'Final Interview',
 }
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -80,12 +87,20 @@ function ApplicationStepper({ app }: { app: Application }) {
   return (
     <div>
       {/* Current status badge */}
-      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold mb-4 ${stageInfo.bg} ${stageInfo.text}`}>
-        <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot}`} />
-        {stageMeta.label}
-        {app.stage_updated_at && (
-          <span className="opacity-60 font-normal ml-1">
-            · {new Date(app.stage_updated_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${stageInfo.bg} ${stageInfo.text}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${stageInfo.dot}`} />
+          {stageMeta.label}
+          {app.stage_updated_at && (
+            <span className="opacity-60 font-normal ml-1">
+              · {new Date(app.stage_updated_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+            </span>
+          )}
+        </div>
+        {app.pipeline_stage === 'interview' && app.interview_stage && INTERVIEW_SUB_STAGES[app.interview_stage] && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-600 text-white">
+            <ChevronRight size={10} />
+            {INTERVIEW_SUB_STAGES[app.interview_stage]}
           </span>
         )}
       </div>
@@ -215,23 +230,43 @@ export default function MyApplicationsPage() {
         .select(`
           id,
           pipeline_stage,
+          interview_stage,
           stage_history,
           stage_updated_at,
           created_at,
           opportunities (
-            id, title, type, city,
-            employer_profiles ( company_name )
+            id, title, type, city, employer_id
           )
         `)
         .eq('seeker_id', user.id)
         .order('created_at', { ascending: false })
 
-      // Supabase returns the FK join as "opportunities" (plural); remap to "opportunity"
+      // Fetch company names separately — nested employer_profiles join fails
+      // because employer_profiles.user_id has no FK relationship to opportunities.employer_id
+      const employerIds = [...new Set(
+        (data || []).map((row: Record<string, unknown>) => {
+          const opp = Array.isArray(row.opportunities) ? row.opportunities[0] : row.opportunities
+          return (opp as Record<string, unknown>)?.employer_id as string
+        }).filter(Boolean)
+      )]
+      const companyMap = new Map<string, string>()
+      if (employerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('employer_profiles')
+          .select('user_id, company_name')
+          .in('user_id', employerIds)
+        ;(profiles || []).forEach((p: Record<string, unknown>) => {
+          companyMap.set(p.user_id as string, p.company_name as string)
+        })
+      }
+
       const mapped: Application[] = (data || []).map((row: Record<string, unknown>) => {
         const opp = Array.isArray(row.opportunities) ? row.opportunities[0] : row.opportunities
+        const employerId = (opp as Record<string, unknown>)?.employer_id as string
         return {
           id: row.id as string,
           pipeline_stage: (row.pipeline_stage ?? 'applied') as StageName,
+          interview_stage: (row.interview_stage as string | null) ?? null,
           stage_history: (row.stage_history ?? []) as { stage: string; at: string }[],
           stage_updated_at: row.stage_updated_at as string,
           created_at: row.created_at as string,
@@ -240,7 +275,7 @@ export default function MyApplicationsPage() {
             title: (opp as Record<string, unknown>).title as string,
             type: (opp as Record<string, unknown>).type as string,
             city: (opp as Record<string, unknown>).city as string | undefined,
-            employer_profiles: (opp as Record<string, unknown>).employer_profiles as { company_name?: string } | null,
+            company_name: companyMap.get(employerId),
           } : null,
         }
       })
@@ -315,7 +350,7 @@ export default function MyApplicationsPage() {
             {applications.map(app => {
               const job = app.opportunity
               if (!job) return null
-              const company = (job.employer_profiles as { company_name?: string } | null)?.company_name
+              const company = job.company_name
 
               return (
                 <div key={app.id} className="bg-white rounded-2xl border border-gray-200 p-6 hover:border-gray-300 transition-colors">

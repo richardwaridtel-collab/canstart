@@ -6,10 +6,18 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, MapPin, Globe, Briefcase, Download, ExternalLink,
-  Users, ChevronRight, ChevronLeft, Pencil, Check, X,
+  Users, ChevronRight, ChevronLeft, Pencil, Check, X, XCircle,
   BookmarkPlus, BookmarkCheck, Tag, ChevronDown, ChevronUp,
   MessageSquare, CalendarPlus, Lock,
 } from 'lucide-react'
+
+// ── Interview sub-stages ──────────────────────────────────────────────────────
+
+const INTERVIEW_SUB_STAGES = [
+  { key: 'initial_interview',        label: 'Initial Interview',          color: 'text-blue-700',   bg: 'bg-blue-50',   border: 'border-blue-200',   active: 'bg-blue-600'   },
+  { key: 'hiring_manager_interview', label: 'Hiring Manager Interview',   color: 'text-indigo-700', bg: 'bg-indigo-50', border: 'border-indigo-200', active: 'bg-indigo-600' },
+  { key: 'final_interview',          label: 'Final Interview',            color: 'text-purple-700', bg: 'bg-purple-50', border: 'border-purple-200', active: 'bg-purple-600' },
+]
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +34,7 @@ type Applicant = {
   created_at: string
   stage_updated_at?: string
   stage_history: { stage: string; at: string }[]
+  interview_stage: string | null
   seeker_id: string
   full_name: string
   city?: string
@@ -107,6 +116,7 @@ export default function PipelinePage() {
   const [poolLoadingId, setPool]= useState<string | null>(null)
   const [empId, setEmpId]       = useState<string | null>(null)
   const [messagingId, setMsg]   = useState<string | null>(null)
+  const [settingInterviewId, setSettingInterview] = useState<string | null>(null)
 
   useEffect(() => { checkAuth() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -140,7 +150,7 @@ export default function PipelinePage() {
 
     const { data: apps } = await supabase
       .from('applications')
-      .select('id, status, pipeline_stage, stage_notes, tags, cover_note, created_at, stage_updated_at, stage_history, seeker_id')
+      .select('id, status, pipeline_stage, stage_notes, tags, cover_note, created_at, stage_updated_at, stage_history, seeker_id, interview_stage')
       .eq('opportunity_id', jobId)
       .order('created_at', { ascending: false })
     if (!apps?.length) { setApps([]); return }
@@ -192,6 +202,7 @@ export default function PipelinePage() {
         created_at:        a.created_at as string,
         stage_updated_at:  a.stage_updated_at as string | undefined,
         stage_history:     history,
+        interview_stage:   (a.interview_stage as string | null) ?? null,
         seeker_id:         a.seeker_id as string,
         full_name:         (p?.full_name as string) || 'Unknown',
         city:              p?.city as string | undefined,
@@ -231,6 +242,15 @@ export default function PipelinePage() {
       a.id === appId ? { ...a, pipeline_stage: newStage, stage_history: newHistory } : a
     ))
     setMoving(null)
+  }
+
+  // Set interview sub-stage
+  const setInterviewStage = async (appId: string, stage: string) => {
+    setSettingInterview(appId)
+    const newStage = stage || null
+    await supabase.from('applications').update({ interview_stage: newStage }).eq('id', appId)
+    setApps(prev => prev.map(a => a.id === appId ? { ...a, interview_stage: newStage } : a))
+    setSettingInterview(null)
   }
 
   // Save per-stage note
@@ -384,6 +404,9 @@ export default function PipelinePage() {
                           onTogglePool={() => togglePool(app.seeker_id, !!app.inPool)}
                           onMessage={() => startConversation(app.seeker_id)}
                           messagingLoading={messagingId === app.seeker_id}
+                          interviewStage={app.interview_stage}
+                          settingInterviewStage={settingInterviewId === app.id}
+                          onSetInterviewStage={(stage) => setInterviewStage(app.id, stage)}
                           scheduleUrl={`/interviews/new?seekerId=${app.seeker_id}&seekerName=${encodeURIComponent(app.full_name)}&appId=${app.id}&oppId=${jobId}&oppTitle=${encodeURIComponent(job?.title || '')}`}
                           predefinedTags={PREDEFINED_TAGS}
                           tagColors={TAG_COLORS}
@@ -428,6 +451,9 @@ type CardProps = {
   onTogglePool: () => void
   onMessage: () => void
   messagingLoading: boolean
+  interviewStage: string | null
+  settingInterviewStage: boolean
+  onSetInterviewStage: (stage: string) => void
   scheduleUrl: string
   predefinedTags: string[]
   tagColors: Record<string, string>
@@ -441,6 +467,7 @@ function CandidateCard({
   noteDraft, downloadingResume, poolLoading, expanded, onToggleExpand,
   onMove, onEditNotes, onCancelNotes, onNoteDraftChange, onSaveNotes,
   onToggleTag, onDownloadResume, onTogglePool, onMessage, messagingLoading,
+  interviewStage, settingInterviewStage, onSetInterviewStage,
   scheduleUrl, predefinedTags, tagColors, immigrationLabels, modeLabels, stages,
 }: CardProps) {
   const [showTagPicker, setShowTagPicker] = useState(false)
@@ -493,6 +520,17 @@ function CandidateCard({
             </span>
           )}
         </div>
+
+        {/* Interview sub-stage badge (visible without expanding) */}
+        {stage.key === 'interview' && interviewStage && (
+          <div className="mt-2">
+            {INTERVIEW_SUB_STAGES.filter(s => s.key === interviewStage).map(sub => (
+              <span key={sub.key} className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium ${sub.bg} ${sub.color} ${sub.border}`}>
+                <Check size={10} /> {sub.label}
+              </span>
+            ))}
+          </div>
+        )}
 
         {app.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-2">
@@ -629,6 +667,64 @@ function CandidateCard({
             )}
           </div>
 
+          {/* ── Interview Progress (interview stage only) ──────────── */}
+          {stage.key === 'interview' && (
+            <div className="rounded-xl border border-indigo-200 overflow-hidden">
+              <div className="bg-indigo-100 px-3 py-2 flex items-center gap-1.5">
+                <CalendarPlus size={12} className="text-indigo-600" />
+                <p className="text-xs font-semibold text-indigo-700">Interview Round</p>
+              </div>
+              <div className="p-2 space-y-1">
+                {INTERVIEW_SUB_STAGES.map(sub => {
+                  const isActive = interviewStage === sub.key
+                  return (
+                    <button
+                      key={sub.key}
+                      onClick={() => onSetInterviewStage(isActive ? '' : sub.key)}
+                      disabled={settingInterviewStage}
+                      className={`w-full text-left text-xs px-2.5 py-1.5 rounded-lg border transition-colors flex items-center gap-2 font-medium disabled:opacity-50 ${
+                        isActive
+                          ? `${sub.active} text-white border-transparent`
+                          : `${sub.bg} ${sub.color} ${sub.border} hover:brightness-95`
+                      }`}
+                    >
+                      {settingInterviewStage && interviewStage === sub.key
+                        ? <div className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                        : isActive ? <Check size={11} className="flex-shrink-0" /> : <div className="w-3 h-3 rounded-full border border-current opacity-40 flex-shrink-0" />}
+                      {sub.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="px-2 pb-2 pt-1 border-t border-indigo-100 space-y-1">
+                <p className="text-[10px] text-indigo-400 font-semibold uppercase tracking-wide px-0.5">Interview Outcome</p>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => onMove(app.id, 'rejected')}
+                    disabled={moving}
+                    className="flex-1 flex items-center justify-center gap-1 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-700 px-2 py-1.5 rounded-lg border border-red-200 transition-colors disabled:opacity-50"
+                  >
+                    <XCircle size={11} /> Not Selected
+                  </button>
+                  <button
+                    onClick={onTogglePool}
+                    disabled={poolLoading}
+                    className={`flex-1 flex items-center justify-center gap-1 text-xs font-medium px-2 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+                      app.inPool
+                        ? 'bg-purple-100 text-purple-700 border-purple-300'
+                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
+                    }`}
+                  >
+                    {poolLoading
+                      ? <div className="w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
+                      : app.inPool ? <BookmarkCheck size={11} /> : <BookmarkPlus size={11} />}
+                    {app.inPool ? 'In Pool' : 'Pool for Future'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Action buttons */}
           <div className="flex flex-wrap gap-1.5">
             <button
@@ -643,7 +739,7 @@ function CandidateCard({
               href={scheduleUrl}
               className="flex items-center gap-1 text-xs bg-green-50 hover:bg-green-100 text-green-700 px-2.5 py-1.5 rounded-full font-medium transition-colors"
             >
-              <CalendarPlus size={11} /> Interview
+              <CalendarPlus size={11} /> Schedule Interview
             </Link>
             {app.resume_path && (
               <button
@@ -695,6 +791,19 @@ function CandidateCard({
           </button>
         ) : <div className="w-6" />}
       </div>
+
+      {/* Call for Interview — prominent CTA on shortlisted cards */}
+      {stage.key === 'shortlisted' && (
+        <button
+          onClick={() => onMove(app.id, 'interview')}
+          disabled={moving}
+          className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white py-2 transition-colors rounded-b-xl disabled:opacity-50"
+        >
+          {moving
+            ? <div className="w-3 h-3 border border-white/40 border-t-white rounded-full animate-spin" />
+            : <><CalendarPlus size={12} /> Call for Interview</>}
+        </button>
+      )}
     </div>
   )
 }
