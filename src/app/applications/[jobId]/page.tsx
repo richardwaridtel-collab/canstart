@@ -123,12 +123,19 @@ export default function PipelinePage() {
   const loadData = async (employerId: string) => {
     const { data: jobData } = await supabase
       .from('opportunities')
-      .select('id, title, type, city, employer_profiles(company_name)')
+      .select('id, title, type, city')
       .eq('id', jobId).eq('employer_id', employerId).single()
     if (!jobData) { router.push('/dashboard'); return }
+
+    const { data: empProfile } = await supabase
+      .from('employer_profiles')
+      .select('company_name')
+      .eq('user_id', employerId)
+      .single()
+
     setJob({
       id: jobData.id, title: jobData.title, type: jobData.type, city: jobData.city,
-      company_name: (jobData.employer_profiles as { company_name?: string } | null)?.company_name,
+      company_name: empProfile?.company_name ?? undefined,
     })
 
     const { data: apps } = await supabase
