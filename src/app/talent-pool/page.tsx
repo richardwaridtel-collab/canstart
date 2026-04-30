@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase'
 import {
   ArrowLeft, MapPin, Globe, Briefcase, Download, ExternalLink,
   BookmarkCheck, BookmarkX, Users, Search, Tag, Pencil, Check, X,
-  Send, ChevronDown,
+  Send, ChevronDown, MessageSquare, CalendarPlus,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -166,6 +166,27 @@ export default function TalentPoolPage() {
     const { data } = await supabase.storage.from('candidate-documents').createSignedUrl(path, 3600)
     setDownloadingId(null)
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
+  const startConversation = async (seekerId: string) => {
+    if (!employerId) return
+    const { data: existing } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('employer_id', employerId)
+      .eq('seeker_id', seekerId)
+      .is('opportunity_id', null)
+      .maybeSingle()
+    let convId = existing?.id
+    if (!convId) {
+      const { data: created } = await supabase
+        .from('conversations')
+        .insert({ employer_id: employerId, seeker_id: seekerId, opportunity_id: null })
+        .select('id')
+        .single()
+      convId = created?.id
+    }
+    if (convId) window.location.href = `/messages/${convId}`
   }
 
   const notifyPool = async () => {
@@ -504,6 +525,22 @@ export default function TalentPoolPage() {
 
                 {/* Actions */}
                 <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-100">
+                  {/* Message */}
+                  <button
+                    onClick={() => startConversation(entry.seeker_id)}
+                    className="flex items-center gap-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-full font-medium transition-colors"
+                  >
+                    <MessageSquare size={11} /> Message
+                  </button>
+
+                  {/* Interview */}
+                  <Link
+                    href={`/interviews/new?seekerId=${encodeURIComponent(entry.seeker_id)}&seekerName=${encodeURIComponent(entry.full_name)}`}
+                    className="flex items-center gap-1 text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-300 px-2.5 py-1.5 rounded-full font-medium transition-colors"
+                  >
+                    <CalendarPlus size={11} /> Interview
+                  </Link>
+
                   {entry.resume_path && (
                     <button
                       onClick={() => downloadResume(entry.resume_path!, entry.seeker_id)}
@@ -519,7 +556,7 @@ export default function TalentPoolPage() {
                       href={entry.linkedin_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-2.5 py-1.5 rounded-full font-medium transition-colors"
+                      className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-200 px-2.5 py-1.5 rounded-full font-medium transition-colors"
                     >
                       <ExternalLink size={11} /> LinkedIn
                     </a>

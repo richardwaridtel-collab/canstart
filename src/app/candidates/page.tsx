@@ -776,12 +776,14 @@ function CandidateCard({
             <MessageSquare size={13} /> Message
           </button>
 
-          <Link
-            href={scheduleUrl}
-            className="flex items-center gap-1 text-xs bg-gray-50 hover:bg-green-50 text-gray-600 hover:text-green-700 border border-gray-200 hover:border-green-300 px-2.5 py-1.5 rounded-lg transition-colors"
-          >
-            <CalendarPlus size={13} /> Interview
-          </Link>
+          {c.inPool && (
+            <Link
+              href={scheduleUrl}
+              className="flex items-center gap-1 text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-300 px-2.5 py-1.5 rounded-lg transition-colors"
+            >
+              <CalendarPlus size={13} /> Interview
+            </Link>
+          )}
 
           {c.resumePath && (
             <button
