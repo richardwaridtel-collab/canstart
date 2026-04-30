@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
-import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle, MessageSquarePlus, Star } from 'lucide-react'
+import { Briefcase, Clock, CheckCircle, XCircle, PlusCircle, Users, ArrowRight, Eye, ExternalLink, Trash2, Sparkles, Target, MapPin, Calendar, AlertCircle, MessageSquarePlus, Star, BookmarkCheck } from 'lucide-react'
 import { MatchBattery } from '@/components/MatchBattery'
 
 type Profile = { role: 'seeker' | 'employer'; full_name: string; city: string }
@@ -381,6 +381,9 @@ export default function DashboardPage() {
                 <Link href="/candidates" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
                   <Users size={16} /> Browse Candidates
                 </Link>
+                <Link href="/talent-pool" className="bg-white/20 hover:bg-white/30 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors">
+                  <BookmarkCheck size={16} /> Talent Pool
+                </Link>
               </>
             )}
           </div>
@@ -691,8 +694,8 @@ export default function DashboardPage() {
                         <span className={`text-xs font-medium px-2 py-1 rounded-full ${job.status === 'open' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                           {job.status}
                         </span>
-                        <Link href={`/applications/${job.id}`} className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1">
-                          <Eye size={14} /> Applicants
+                        <Link href={`/applications/${job.id}`} className="text-xs font-medium text-purple-600 hover:text-purple-800 flex items-center gap-1">
+                          <Eye size={14} /> Pipeline
                         </Link>
                       </div>
                     </div>

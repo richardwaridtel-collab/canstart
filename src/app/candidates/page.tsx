@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink, FileText, Download, ChevronDown } from 'lucide-react'
+import { Search, MapPin, Globe, Briefcase, SlidersHorizontal, ExternalLink, FileText, Download, ChevronDown, BookmarkPlus, BookmarkCheck } from 'lucide-react'
 
 type Candidate = {
   id: string
@@ -18,6 +18,7 @@ type Candidate = {
   linkedin_url?: string
   resume_path?: string
   additional_doc_path?: string
+  inPool?: boolean
 }
 
 type PostedOpportunity = {
@@ -81,6 +82,8 @@ export default function CandidatesPage() {
   const [postedJobs, setPostedJobs] = useState<PostedOpportunity[]>([])
   const [selectedJobId, setSelectedJobId] = useState<string>('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [poolLoadingId, setPoolLoadingId] = useState<string | null>(null)
+  const [currentEmployerId, setCurrentEmployerId] = useState<string | null>(null)
 
   const cities = ['All Cities', 'Ottawa', 'Toronto', 'Calgary', 'Vancouver', 'Montreal', 'Edmonton', 'Winnipeg', 'Halifax']
   const selectedJob = postedJobs.find((j) => j.id === selectedJobId) || null
@@ -104,14 +107,19 @@ export default function CandidatesPage() {
     if (profile?.role !== 'employer') { router.push('/dashboard'); return }
     setIsEmployer(true)
     setAuthChecked(true)
+    setCurrentEmployerId(user.id)
     const { data: jobs } = await supabase.from('opportunities').select('id, title, skills_required, work_mode, city').eq('employer_id', user.id).eq('status', 'open')
     if (jobs) setPostedJobs(jobs as PostedOpportunity[])
-    loadCandidates()
+    loadCandidates(user.id)
   }
 
-  const loadCandidates = async () => {
+  const loadCandidates = async (empId?: string) => {
     try {
-      const { data } = await supabase.from('profiles').select('*, seeker_profiles(*)').eq('role', 'seeker').limit(50)
+      const [{ data }, { data: poolData }] = await Promise.all([
+        supabase.from('profiles').select('*, seeker_profiles(*)').eq('role', 'seeker').limit(50),
+        empId ? supabase.from('talent_pool').select('seeker_id').eq('employer_id', empId) : Promise.resolve({ data: [] }),
+      ])
+      const poolSet = new Set(((poolData || []) as Record<string, unknown>[]).map(p => p.seeker_id as string))
       if (data && data.length > 0) {
         const mapped = data.map((p: Record<string, unknown>) => {
           const sp = p.seeker_profiles as Record<string, unknown> | null
@@ -128,11 +136,24 @@ export default function CandidatesPage() {
             linkedin_url: sp?.linkedin_url as string | undefined,
             resume_path: sp?.resume_path as string | undefined,
             additional_doc_path: sp?.additional_doc_path as string | undefined,
+            inPool: poolSet.has(p.id as string),
           }
         })
         setCandidates(mapped)
       }
     } catch { /* ignore */ }
+  }
+
+  const togglePool = async (candidateId: string, inPool: boolean) => {
+    if (!currentEmployerId) return
+    setPoolLoadingId(candidateId)
+    if (inPool) {
+      await supabase.from('talent_pool').delete().eq('employer_id', currentEmployerId).eq('seeker_id', candidateId)
+    } else {
+      await supabase.from('talent_pool').insert({ employer_id: currentEmployerId, seeker_id: candidateId })
+    }
+    setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, inPool: !inPool } : c))
+    setPoolLoadingId(null)
   }
 
   const downloadDoc = async (path: string, label: string, candidateId: string) => {
@@ -235,8 +256,27 @@ export default function CandidatesPage() {
 
                   {matchPct !== null && <MatchBar pct={matchPct} />}
 
+                  {isEmployer && (
+                    <div className={`flex items-center justify-between ${matchPct !== null ? 'mt-3' : 'pt-3 border-t border-gray-100 mt-3'}`}>
+                      <button
+                        onClick={() => togglePool(candidate.id, !!candidate.inPool)}
+                        disabled={poolLoadingId === candidate.id}
+                        title={candidate.inPool ? 'Remove from Talent Pool' : 'Save to Talent Pool'}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full font-medium transition-colors disabled:opacity-50 ${
+                          candidate.inPool
+                            ? 'bg-purple-100 text-purple-700 hover:bg-purple-200'
+                            : 'bg-gray-100 text-gray-500 hover:bg-purple-50 hover:text-purple-600'
+                        }`}
+                      >
+                        {poolLoadingId === candidate.id
+                          ? <div className="w-3 h-3 border border-purple-400 border-t-transparent rounded-full animate-spin" />
+                          : candidate.inPool ? <BookmarkCheck size={12} /> : <BookmarkPlus size={12} />}
+                        {candidate.inPool ? 'In Pool' : 'Save to Pool'}
+                      </button>
+                    </div>
+                  )}
                   {isEmployer && (candidate.resume_path || candidate.additional_doc_path) && (
-                    <div className={`flex flex-wrap gap-2 ${matchPct !== null ? 'mt-3' : 'pt-3 border-t border-gray-100 mt-3'}`}>
+                    <div className="flex flex-wrap gap-2 mt-2">
                       {candidate.resume_path && (
                         <button
                           onClick={() => downloadDoc(candidate.resume_path!, 'resume', candidate.id)}
